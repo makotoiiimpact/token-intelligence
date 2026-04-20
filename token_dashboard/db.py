@@ -72,6 +72,30 @@ CREATE TABLE IF NOT EXISTS dismissed_tips (
   tip_key       TEXT PRIMARY KEY,
   dismissed_at  REAL NOT NULL
 );
+
+CREATE TABLE IF NOT EXISTS session_health (
+  session_id          TEXT PRIMARY KEY,
+  health_score        INTEGER NOT NULL,
+  turn_count          INTEGER NOT NULL,
+  total_tokens        INTEGER NOT NULL,
+  correction_cycles   INTEGER NOT NULL DEFAULT 0,
+  cache_hit_rate      REAL    NOT NULL DEFAULT 0,
+  components_json     TEXT,
+  computed_at         REAL    NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS tips (
+  id                  INTEGER PRIMARY KEY AUTOINCREMENT,
+  rule_id             TEXT    NOT NULL,
+  severity            TEXT    NOT NULL,
+  session_id          TEXT,
+  message             TEXT    NOT NULL,
+  estimated_savings   INTEGER NOT NULL DEFAULT 0,
+  created_at          REAL    NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_tips_rule     ON tips(rule_id);
+CREATE INDEX IF NOT EXISTS idx_tips_severity ON tips(severity);
+CREATE INDEX IF NOT EXISTS idx_tips_session  ON tips(session_id);
 """
 
 
