@@ -96,6 +96,17 @@ CREATE TABLE IF NOT EXISTS tips (
 CREATE INDEX IF NOT EXISTS idx_tips_rule     ON tips(rule_id);
 CREATE INDEX IF NOT EXISTS idx_tips_severity ON tips(severity);
 CREATE INDEX IF NOT EXISTS idx_tips_session  ON tips(session_id);
+
+CREATE TABLE IF NOT EXISTS ai_analyses (
+  id             INTEGER PRIMARY KEY AUTOINCREMENT,
+  session_id     TEXT,
+  analysis_type  TEXT NOT NULL,
+  analysis_json  TEXT NOT NULL,
+  analyzed_at    REAL NOT NULL,
+  model_used     TEXT
+);
+CREATE INDEX IF NOT EXISTS idx_ai_analyses_session ON ai_analyses(session_id, analysis_type);
+CREATE INDEX IF NOT EXISTS idx_ai_analyses_type    ON ai_analyses(analysis_type);
 """
 
 

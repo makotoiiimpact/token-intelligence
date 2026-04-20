@@ -23,6 +23,7 @@ from .health_score import (
 )
 from .scanner import scan_dir
 from .skills import cached_catalog
+from . import ai_analyzer
 
 
 WEB_ROOT = Path(__file__).resolve().parent.parent / "web"
@@ -141,6 +142,12 @@ def build_handler(db_path: str, projects_dir: str):
             if path.startswith("/api/sessions/"):
                 sid = path.rsplit("/", 1)[1]
                 return _send_json(self, session_turns(db_path, sid))
+            if path.startswith("/api/analyze/"):
+                sid = path.rsplit("/", 1)[1]
+                cached = ai_analyzer.get_cached_analysis(db_path, sid)
+                if cached is None:
+                    return _send_error(self, 404, "no cached analysis for this session")
+                return _send_json(self, cached)
             if path == "/api/tips":
                 with __import__("sqlite3").connect(db_path) as conn:
                     conn.row_factory = __import__("sqlite3").Row
@@ -211,6 +218,24 @@ def build_handler(db_path: str, projects_dir: str):
             if url.path == "/api/tips/dismiss":
                 dismiss_tip(db_path, body.get("key", ""))
                 return _send_json(self, {"ok": True})
+            if url.path == "/api/analyze" or url.path.startswith("/api/analyze/"):
+                force = body.get("force") is True
+                try:
+                    if url.path == "/api/analyze":
+                        data = ai_analyzer.analyze_usage(db_path, force=force)
+                    else:
+                        sid = url.path.rsplit("/", 1)[1]
+                        data = ai_analyzer.analyze_session(db_path, sid, force=force)
+                    return _send_json(self, data)
+                except ai_analyzer.ApiKeyMissingError as e:
+                    return _send_json(self, {
+                        "configured": False,
+                        "error": str(e),
+                    })
+                except ai_analyzer.RateLimitError as e:
+                    return _send_error(self, 429, str(e))
+                except RuntimeError as e:
+                    return _send_error(self, 502, str(e))
             self.send_response(404)
             self.end_headers()
 
