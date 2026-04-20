@@ -1,38 +1,60 @@
-// charts.js — themed ECharts wrappers
+// charts.js — themed ECharts wrappers (Token Intelligence design system)
 
-const PALETTE = ['#4A9EFF', '#7C5CFF', '#3FB68B', '#E8A23B', '#E5484D', '#5BCEDA', '#F472B6'];
+export const PALETTE = [
+  '#19F58C', // green — primary
+  '#0066FF', // blue
+  '#8F00FF', // purple
+  '#FFD600', // yellow
+  '#FF423D', // red
+  '#00FFE0', // cyan
+];
+
+const AXIS_LABEL_COLOR = 'rgba(255, 255, 255, 0.4)';
+const AXIS_LINE_COLOR  = 'rgba(255, 255, 255, 0.1)';
+const SPLIT_LINE_COLOR = 'rgba(255, 255, 255, 0.05)';
+const TEXT_COLOR       = 'rgba(255, 255, 255, 0.6)';
 
 const BASE = {
-  textStyle: { color: '#E6EDF3', fontFamily: 'Inter' },
+  backgroundColor: 'transparent',
+  textStyle: { color: TEXT_COLOR, fontFamily: 'Red Hat Text' },
   color: PALETTE,
-  grid: { left: 36, right: 12, top: 24, bottom: 24, containLabel: true },
+  grid: { left: 36, right: 18, top: 28, bottom: 24, containLabel: true },
 };
 
 const X_AXIS = {
-  axisLine:  { lineStyle: { color: '#1F2630' } },
-  axisLabel: { color: '#8B98A6' },
+  axisLine:  { lineStyle: { color: AXIS_LINE_COLOR } },
+  axisLabel: { color: AXIS_LABEL_COLOR, fontFamily: 'Red Hat Text' },
   axisTick:  { show: false },
 };
 
 const Y_AXIS = {
   axisLine:  { show: false },
   axisTick:  { show: false },
-  splitLine: { lineStyle: { color: '#1F2630' } },
-  axisLabel: { color: '#8B98A6' },
+  splitLine: { lineStyle: { color: SPLIT_LINE_COLOR } },
+  axisLabel: { color: AXIS_LABEL_COLOR, fontFamily: 'Red Hat Text' },
 };
 
 const TOOLTIP = {
   trigger: 'axis',
-  backgroundColor: '#0F1419',
-  borderColor: '#283040',
+  backgroundColor: 'rgba(15, 15, 15, 0.92)',
+  borderColor: 'rgba(255, 255, 255, 0.12)',
   borderWidth: 1,
-  textStyle: { color: '#E6EDF3', fontFamily: 'Inter', fontSize: 12 },
-  padding: [8, 12],
+  textStyle: { color: '#FFFFFF', fontFamily: 'Red Hat Text', fontSize: 12 },
+  padding: [10, 14],
+  extraCssText: 'backdrop-filter: blur(12px); border-radius: 12px;',
+};
+
+const LEGEND = {
+  textStyle: { color: TEXT_COLOR, fontFamily: 'Red Hat Text' },
+  top: 0, right: 0,
+  icon: 'roundRect',
+  itemWidth: 8, itemHeight: 8,
 };
 
 function mount(el) {
   const c = echarts.init(el, null, { renderer: 'svg' });
-  window.addEventListener('resize', () => c.resize());
+  const onResize = () => c.resize();
+  window.addEventListener('resize', onResize);
   return c;
 }
 
@@ -41,7 +63,7 @@ export function lineChart(el, { x, series }) {
   c.setOption({
     ...BASE,
     tooltip: TOOLTIP,
-    legend: { textStyle: { color: '#8B98A6' }, top: 0, right: 0, icon: 'roundRect', itemWidth: 8, itemHeight: 8 },
+    legend: LEGEND,
     xAxis: { ...X_AXIS, type: 'category', data: x, boundaryGap: false },
     yAxis: { ...Y_AXIS, type: 'value' },
     series: series.map(s => ({
@@ -52,17 +74,136 @@ export function lineChart(el, { x, series }) {
   return c;
 }
 
+/**
+ * Area chart with horizontal threshold markers.
+ * thresholds: [{ value, color, label }]
+ */
+export function areaChartWithThresholds(el, { x, values, color, thresholds = [] }) {
+  const c = mount(el);
+  const fill = color || PALETTE[0];
+  c.setOption({
+    ...BASE,
+    tooltip: {
+      ...TOOLTIP,
+      valueFormatter: v => Number(v).toLocaleString() + ' tokens',
+    },
+    xAxis: {
+      ...X_AXIS,
+      type: 'category',
+      data: x,
+      boundaryGap: false,
+      axisLabel: {
+        ...X_AXIS.axisLabel,
+        interval: x.length > 20 ? 'auto' : 0,
+        rotate: x.length > 12 ? 35 : 0,
+      },
+    },
+    yAxis: {
+      ...Y_AXIS,
+      type: 'value',
+      axisLabel: {
+        ...Y_AXIS.axisLabel,
+        formatter: v => {
+          const n = Math.abs(v);
+          if (n >= 1e9) return (v / 1e9).toFixed(1) + 'B';
+          if (n >= 1e6) return (v / 1e6).toFixed(1) + 'M';
+          if (n >= 1e3) return (v / 1e3).toFixed(0) + 'K';
+          return v;
+        },
+      },
+    },
+    series: [{
+      type: 'line',
+      data: values,
+      smooth: true,
+      showSymbol: false,
+      lineStyle: { width: 2, color: fill },
+      itemStyle: { color: fill },
+      areaStyle: {
+        color: {
+          type: 'linear', x: 0, y: 0, x2: 0, y2: 1,
+          colorStops: [
+            { offset: 0, color: fill + '66' },  // 40%
+            { offset: 1, color: fill + '00' },  // 0%
+          ],
+        },
+      },
+      markLine: thresholds.length ? {
+        symbol: ['none', 'none'],
+        silent: true,
+        lineStyle: { type: 'dashed', width: 1.5 },
+        label: {
+          position: 'insideEndTop',
+          color: 'rgba(255,255,255,0.6)',
+          fontFamily: 'Red Hat Mono',
+          fontSize: 10,
+        },
+        data: thresholds.map(t => ({
+          yAxis: t.value,
+          lineStyle: { color: t.color },
+          label: { formatter: t.label || '', color: t.color },
+        })),
+      } : undefined,
+    }],
+  });
+  return c;
+}
+
 export function barChart(el, { categories, values, color }) {
   const c = mount(el);
   c.setOption({
     ...BASE,
     tooltip: { ...TOOLTIP, axisPointer: { type: 'shadow' } },
-    xAxis: { ...X_AXIS, type: 'category', data: categories, axisLabel: { ...X_AXIS.axisLabel, interval: 0, rotate: categories.length > 5 ? 25 : 0 } },
+    xAxis: {
+      ...X_AXIS, type: 'category', data: categories,
+      axisLabel: {
+        ...X_AXIS.axisLabel, interval: 0,
+        rotate: categories.length > 5 ? 25 : 0,
+      },
+    },
     yAxis: { ...Y_AXIS, type: 'value' },
     series: [{
       type: 'bar', data: values,
-      itemStyle: { color: color || PALETTE[0], borderRadius: [4, 4, 0, 0] },
+      itemStyle: { color: color || PALETTE[0], borderRadius: [6, 6, 0, 0] },
       barMaxWidth: 32,
+    }],
+  });
+  return c;
+}
+
+/** Horizontal bar chart (for per-project token comparison). */
+export function horizontalBarChart(el, { categories, values, color, formatter }) {
+  const c = mount(el);
+  c.setOption({
+    ...BASE,
+    grid: { left: 12, right: 24, top: 12, bottom: 12, containLabel: true },
+    tooltip: {
+      ...TOOLTIP,
+      axisPointer: { type: 'shadow' },
+      valueFormatter: formatter || (v => Number(v).toLocaleString()),
+    },
+    xAxis: {
+      ...Y_AXIS, type: 'value',
+      axisLabel: {
+        ...Y_AXIS.axisLabel,
+        formatter: v => {
+          const n = Math.abs(v);
+          if (n >= 1e9) return (v / 1e9).toFixed(1) + 'B';
+          if (n >= 1e6) return (v / 1e6).toFixed(1) + 'M';
+          if (n >= 1e3) return (v / 1e3).toFixed(0) + 'K';
+          return v;
+        },
+      },
+    },
+    yAxis: {
+      ...X_AXIS, type: 'category', data: categories,
+      inverse: true,
+      axisLabel: { ...X_AXIS.axisLabel, fontFamily: 'Red Hat Text' },
+    },
+    series: [{
+      type: 'bar', data: values,
+      itemStyle: { color: color || PALETTE[0], borderRadius: [0, 6, 6, 0] },
+      barMaxWidth: 18,
     }],
   });
   return c;
@@ -77,14 +218,14 @@ export function stackedBarChart(el, { categories, series, formatter }) {
       axisPointer: { type: 'shadow' },
       valueFormatter: formatter || (v => Number(v).toLocaleString()),
     },
-    legend: {
-      textStyle: { color: '#8B98A6' },
-      top: 0, right: 0, icon: 'roundRect',
-      itemWidth: 8, itemHeight: 8,
-    },
+    legend: LEGEND,
     xAxis: {
       ...X_AXIS, type: 'category', data: categories,
-      axisLabel: { ...X_AXIS.axisLabel, interval: categories.length > 20 ? 'auto' : 0, rotate: categories.length > 12 ? 45 : 0 },
+      axisLabel: {
+        ...X_AXIS.axisLabel,
+        interval: categories.length > 20 ? 'auto' : 0,
+        rotate: categories.length > 12 ? 45 : 0,
+      },
     },
     yAxis: { ...Y_AXIS, type: 'value' },
     series: series.map((s, i) => ({
@@ -109,21 +250,20 @@ export function groupedBarChart(el, { categories, series, formatter }) {
       axisPointer: { type: 'shadow' },
       valueFormatter: formatter || (v => Number(v).toLocaleString()),
     },
-    legend: {
-      textStyle: { color: '#8B98A6' },
-      top: 0, right: 0, icon: 'roundRect',
-      itemWidth: 8, itemHeight: 8,
-    },
+    legend: LEGEND,
     xAxis: {
       ...X_AXIS, type: 'category', data: categories,
-      axisLabel: { ...X_AXIS.axisLabel, interval: 0, rotate: categories.length > 5 ? 25 : 0 },
+      axisLabel: {
+        ...X_AXIS.axisLabel, interval: 0,
+        rotate: categories.length > 5 ? 25 : 0,
+      },
     },
     yAxis: { ...Y_AXIS, type: 'value' },
     series: series.map((s, i) => ({
       name: s.name,
       type: 'bar',
       data: s.values,
-      itemStyle: { color: s.color || PALETTE[i % PALETTE.length], borderRadius: [4, 4, 0, 0] },
+      itemStyle: { color: s.color || PALETTE[i % PALETTE.length], borderRadius: [6, 6, 0, 0] },
       barMaxWidth: 24,
       emphasis: { focus: 'series' },
     })),
@@ -134,32 +274,41 @@ export function groupedBarChart(el, { categories, series, formatter }) {
 export function donutChart(el, data) {
   const c = mount(el);
   c.setOption({
+    backgroundColor: 'transparent',
     color: PALETTE,
     tooltip: {
       trigger: 'item',
-      backgroundColor: '#0F1419', borderColor: '#283040', borderWidth: 1,
-      textStyle: { color: '#E6EDF3', fontFamily: 'Inter' },
+      backgroundColor: 'rgba(15, 15, 15, 0.92)',
+      borderColor: 'rgba(255, 255, 255, 0.12)',
+      borderWidth: 1,
+      textStyle: { color: '#FFFFFF', fontFamily: 'Red Hat Text' },
+      extraCssText: 'backdrop-filter: blur(12px); border-radius: 12px;',
       formatter: p => `${p.name}<br/><b>${Number(p.value).toLocaleString()}</b> tokens (${p.percent.toFixed(1)}%)`,
     },
     legend: {
-      textStyle: { color: '#8B98A6' },
-      bottom: 10, icon: 'roundRect', itemWidth: 8, itemHeight: 8,
+      textStyle: { color: TEXT_COLOR, fontFamily: 'Red Hat Text' },
+      bottom: 8, icon: 'roundRect', itemWidth: 8, itemHeight: 8,
       type: 'scroll',
     },
     series: [{
       type: 'pie',
-      center: ['50%', '44%'],
-      radius: ['48%', '68%'],
+      center: ['50%', '46%'],
+      radius: ['54%', '74%'],
       avoidLabelOverlap: true,
       padAngle: 2,
-      itemStyle: { borderColor: '#0F1419', borderWidth: 2, borderRadius: 4 },
+      itemStyle: {
+        borderColor: '#000000',
+        borderWidth: 2,
+        borderRadius: 6,
+      },
       label: {
         show: true,
         position: 'inside',
-        color: '#fff',
+        color: '#000000',
+        fontFamily: 'Red Hat Display',
         fontSize: 12,
-        fontWeight: 600,
-        formatter: ({ percent }) => percent >= 6 ? percent.toFixed(0) + '%' : '',
+        fontWeight: 500,
+        formatter: ({ percent }) => percent >= 7 ? percent.toFixed(0) + '%' : '',
       },
       labelLine: { show: false },
       data,

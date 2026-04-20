@@ -42,7 +42,7 @@ class ServerTests(unittest.TestCase):
 
     def test_index_html(self):
         body = self._get("/")
-        self.assertIn(b"Token Dashboard", body)
+        self.assertIn(b"Token Intelligence", body)
 
     def test_overview_json(self):
         body = json.loads(self._get("/api/overview"))

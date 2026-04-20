@@ -1,5 +1,5 @@
 import { api, fmt, state } from '/web/app.js';
-import { barChart, donutChart, groupedBarChart, stackedBarChart } from '/web/charts.js';
+import { areaChartWithThresholds, horizontalBarChart, donutChart } from '/web/charts.js';
 
 const RANGES = [
   { key: '7d',  label: '7d',  days: 7 },
@@ -30,134 +30,286 @@ function withSince(url, since) {
   return url + (url.includes('?') ? '&' : '?') + 'since=' + encodeURIComponent(since);
 }
 
+function healthBand(score) {
+  if (score == null) return { band: '—', color: 'rgba(255,255,255,0.25)' };
+  if (score >= 80)   return { band: 'good',  color: '#19F58C' };
+  if (score >= 50)   return { band: 'warn',  color: '#FFD600' };
+  return               { band: 'bad',   color: '#FF423D' };
+}
+
+function healthRing(score) {
+  const clamped = Math.max(0, Math.min(100, Math.round(score ?? 0)));
+  const { color } = healthBand(score);
+  const C = 2 * Math.PI * 60; // circumference for r=60
+  const offset = C * (1 - clamped / 100);
+  return `
+    <div class="health-ring" aria-label="Average health score ${clamped} out of 100">
+      <svg viewBox="0 0 140 140">
+        <circle class="track" cx="70" cy="70" r="60" stroke-width="10" fill="none"/>
+        <circle class="fill"  cx="70" cy="70" r="60" stroke-width="10" fill="none"
+                stroke="${color}"
+                stroke-dasharray="${C.toFixed(2)}"
+                stroke-dashoffset="${offset.toFixed(2)}"/>
+      </svg>
+      <div class="center">
+        <div class="num">${score == null ? '—' : clamped}</div>
+        <div class="lbl">Health</div>
+      </div>
+    </div>`;
+}
+
+function severityFromScore(score) {
+  if (score == null) return '';
+  if (score >= 80) return 'good';
+  if (score >= 50) return 'warn';
+  return 'bad';
+}
+
+function severityFromTip(sev) {
+  if (sev === 'critical') return 'critical';
+  if (sev === 'warning')  return 'warning';
+  return 'info';
+}
+
+function titleFromRule(ruleId) {
+  if (!ruleId) return 'Tip';
+  return String(ruleId).replace(/_/g, ' ').toLowerCase().replace(/\b\w/g, c => c.toUpperCase());
+}
+
+function animateCounter(el, target, opts = {}) {
+  const duration = opts.duration || 900;
+  const format = opts.format || (v => Math.round(v).toLocaleString());
+  const start = performance.now();
+  function step(t) {
+    const p = Math.min(1, (t - start) / duration);
+    // ease-out cubic
+    const eased = 1 - Math.pow(1 - p, 3);
+    el.textContent = format(target * eased);
+    if (p < 1) requestAnimationFrame(step);
+  }
+  requestAnimationFrame(step);
+}
+
+function compact(n) {
+  const x = Number(n || 0);
+  if (Math.abs(x) >= 1e9) return (x / 1e9).toFixed(1).replace(/\.0$/, '') + 'B';
+  if (Math.abs(x) >= 1e6) return (x / 1e6).toFixed(1).replace(/\.0$/, '') + 'M';
+  if (Math.abs(x) >= 1e3) return (x / 1e3).toFixed(1).replace(/\.0$/, '') + 'K';
+  return Math.round(x).toLocaleString();
+}
+
 export default async function (root) {
   const range = readRange();
   const since = sinceIso(range);
 
-  const [totals, projects, sessions, tools, daily, byModel] = await Promise.all([
+  const [totals, projects, sessions, daily, byModel, health, tips] = await Promise.all([
     api(withSince('/api/overview', since)),
     api(withSince('/api/projects', since)),
     api(withSince('/api/sessions?limit=10', since)),
-    api(withSince('/api/tools', since)),
     api(withSince('/api/daily', since)),
     api(withSince('/api/by-model', since)),
+    api('/api/health').catch(() => []),
+    api('/api/tips').catch(() => []),
   ]);
 
-  const cacheCreate =
+  // Total billable tokens (input + output + cache create 5m/1h)
+  const billable =
+    (totals.input_tokens || 0) +
+    (totals.output_tokens || 0) +
     (totals.cache_create_5m_tokens || 0) +
     (totals.cache_create_1h_tokens || 0);
 
-  const kpi = (label, compactVal, fullVal, cls = '') => `
-    <div class="card kpi ${cls}">
-      <div class="label">${label}</div>
-      <div class="value" title="${fullVal}">${compactVal}</div>
-    </div>`;
+  // Health score aggregate — build a session_id → health lookup
+  const healthList = Array.isArray(health) ? health : [];
+  const avgHealth = healthList.length
+    ? healthList.reduce((s, h) => s + (Number(h.health_score) || 0), 0) / healthList.length
+    : null;
+  const healthById = new Map(healthList.map(h => [h.session_id, Number(h.health_score)]));
+
+  // Top 3 tips by estimated savings
+  const tipsArr = Array.isArray(tips) ? tips : [];
+  const quickWins = tipsArr
+    .slice()
+    .sort((a, b) => (b.estimated_savings || 0) - (a.estimated_savings || 0))
+    .slice(0, 3);
+
+  const healthBadge = (score) => {
+    const band = severityFromScore(score);
+    if (!band) return '';
+    return `<span class="badge-health ${band}">${Math.round(score)}</span>`;
+  };
 
   const rangeTabs = `
     <div class="range-tabs" role="tablist">
       ${RANGES.map(r => `<button data-range="${r.key}" class="${r.key === range.key ? 'active' : ''}">${r.label}</button>`).join('')}
     </div>`;
 
+  // Hero metrics — 4 cards
+  const heroMetrics = `
+    <div class="row cols-4">
+      <div class="card metric">
+        <div class="label">Total tokens</div>
+        <div class="value" id="m-tokens" title="${fmt.int(billable)} billable tokens">0</div>
+        <div class="sub">input + output + cache create</div>
+      </div>
+      <div class="card metric">
+        <div class="label">Sessions</div>
+        <div class="value" id="m-sessions" title="${fmt.int(totals.sessions)}">0</div>
+        <div class="sub">${fmt.int(totals.turns)} turns total</div>
+      </div>
+      <div class="card card-highlight" style="display:flex;align-items:center;gap:20px">
+        ${healthRing(avgHealth)}
+        <div class="metric" style="gap:6px">
+          <div class="label">Avg health</div>
+          <div class="sub" style="font-family:var(--sans);color:var(--text-2);font-size:13px;max-width:180px;line-height:1.45">
+            ${avgHealth == null
+              ? 'Run a scan to compute session health scores.'
+              : `Across ${healthList.length} session${healthList.length === 1 ? '' : 's'}.`}
+          </div>
+        </div>
+      </div>
+      <div class="card metric good">
+        <div class="label">Est. cost</div>
+        <div class="value" id="m-cost" title="${fmt.usd(totals.cost_usd)}">—</div>
+        ${planSub()}
+      </div>
+    </div>`;
+
+  // Quick Wins panel
+  const quickWinsHtml = quickWins.length === 0
+    ? `<p class="muted" style="margin:0;font-size:13px">No tips detected — nice hygiene. Run a fresh scan to recompute.</p>`
+    : quickWins.map(t => `
+        <div class="quickwin ${severityFromTip(t.severity)}">
+          <span class="dot"></span>
+          <div class="body">
+            <div class="title">${fmt.htmlSafe(t.title || titleFromRule(t.rule_id))}</div>
+            <div class="msg">${fmt.htmlSafe(t.message || t.body || '')}</div>
+          </div>
+          ${t.estimated_savings
+            ? `<span class="savings">~${compact(t.estimated_savings)} saved</span>`
+            : ''}
+        </div>`).join('');
+
   root.innerHTML = `
-    <div class="flex" style="margin-bottom:14px">
-      <h2 style="margin:0;font-size:16px;letter-spacing:-0.01em">Overview</h2>
+    <div class="flex" style="margin-bottom:20px">
+      <h2 style="margin:0;font-family:var(--display);font-weight:500;font-size:24px">Overview</h2>
       <span class="muted" style="font-size:12px">${range.days ? `last ${range.days} days` : 'all time'}</span>
       <div class="spacer"></div>
       ${rangeTabs}
     </div>
 
-    <div class="row cols-7">
-      ${kpi('Sessions',     fmt.int(totals.sessions),       fmt.int(totals.sessions))}
-      ${kpi('Turns',        fmt.int(totals.turns),          fmt.int(totals.turns))}
-      ${kpi('Input',        fmt.compact(totals.input_tokens),       fmt.int(totals.input_tokens) + ' tokens')}
-      ${kpi('Output',       fmt.compact(totals.output_tokens),      fmt.int(totals.output_tokens) + ' tokens')}
-      ${kpi('Cache read',   fmt.compact(totals.cache_read_tokens),  fmt.int(totals.cache_read_tokens) + ' tokens')}
-      ${kpi('Cache create', fmt.compact(cacheCreate),               fmt.int(cacheCreate) + ' tokens')}
-      <div class="card kpi cost">
-        <div class="label">Est. cost</div>
-        <div class="value" title="${fmt.usd(totals.cost_usd)}">${fmt.usd(totals.cost_usd)}</div>
-        ${planSubtitle()}
-      </div>
-    </div>
+    ${heroMetrics}
 
-    <details class="card glossary" style="margin-top:16px">
-      <summary><h3 style="display:inline-block;margin:0">What do these numbers mean?</h3><span class="muted" style="font-size:12px">— click to expand</span></summary>
-      <dl>
-        <dt>Session</dt><dd>One run of Claude Code (from <code>claude</code> to exit). Each session is a single <code>.jsonl</code> file.</dd>
-        <dt>Turn</dt><dd>One message you sent to Claude. Each turn triggers a response (possibly with tool calls in between).</dd>
-        <dt>Input tokens</dt><dd>The new text you (and tool results) sent to Claude this turn. Billed at the full input rate.</dd>
-        <dt>Output tokens</dt><dd>The text Claude wrote back. Billed at the highest rate — usually the biggest cost driver per turn.</dd>
-        <dt>Cache read</dt><dd>Tokens Claude re-used from a cache (your CLAUDE.md, previously-read files, the conversation so far). ~10× cheaper than fresh input. High cache-read counts = good cost hygiene.</dd>
-        <dt>Cache create</dt><dd>Writing something into the cache for the first time. One-time cost; pays off on the next turn.</dd>
-        <dt>Billable tokens</dt><dd>Input + Output + Cache create. Cache reads are billed separately (and much cheaper).</dd>
-      </dl>
-    </details>
-
-    <div class="row cols-2" style="margin-top:16px">
+    <div class="row cols-2-wide" style="margin-top:16px">
       <div class="card">
-        <h3>Your daily work</h3>
-        <p class="muted" style="margin:-4px 0 10px;font-size:12px">Tokens you paid for: what you sent (<b>input</b>), what Claude wrote (<b>output</b>), and what got stored for re-use (<b>cache create</b>).</p>
-        <div id="ch-daily-billable" style="height:260px"></div>
+        <div class="flex" style="margin-bottom:12px">
+          <h3 style="margin:0">Daily token burn</h3>
+          <span class="spacer"></span>
+          <span class="muted" style="font-size:11px;font-family:var(--mono)">
+            <span style="color:var(--yellow)">— 120K</span>
+            &nbsp;&nbsp;<span style="color:var(--red)">— 250K</span>
+          </span>
+        </div>
+        <div id="ch-daily-burn" style="height:280px"></div>
       </div>
       <div class="card">
-        <h3>Daily cache reads</h3>
-        <p class="muted" style="margin:-4px 0 10px;font-size:12px"><b>Cache reads</b> are cheap re-uses of things Claude already saw (like your CLAUDE.md). They cost ~10× less than regular input tokens — high numbers here are a good thing.</p>
-        <div id="ch-daily-cache" style="height:260px"></div>
+        <h3>Quick wins</h3>
+        <p class="muted" style="margin:-4px 0 10px;font-size:12px">Top tips by estimated savings.</p>
+        ${quickWinsHtml}
       </div>
     </div>
 
     <div class="row cols-2" style="margin-top:16px">
-      <div class="card"><h3>Tokens by project</h3><div id="ch-projects" style="height:320px"></div></div>
       <div class="card">
-        <h3>Token usage by model</h3>
+        <h3>Tokens by project</h3>
+        <p class="muted" style="margin:-4px 0 10px;font-size:12px">Top 8 projects by billable tokens.</p>
+        <div id="ch-projects" style="height:320px"></div>
+      </div>
+      <div class="card">
+        <h3>Model distribution</h3>
         <p class="muted" style="margin:-4px 0 4px;font-size:12px">Share of billable tokens per Claude model.</p>
         <div id="ch-model" style="height:300px"></div>
       </div>
     </div>
 
-    <div class="row cols-2" style="margin-top:16px">
-      <div class="card"><h3>Top tools (by call count)</h3><div id="ch-tools" style="height:320px"></div></div>
-      <div class="card">
-        <h3 style="display:flex;align-items:center"><span>Recent sessions</span><span class="spacer"></span><a href="#/sessions" style="font-weight:400;font-size:12px">all →</a></h3>
-        <table>
-          <thead><tr><th>started</th><th>project</th><th class="num">tokens</th></tr></thead>
-          <tbody>
-            ${sessions.map(s => `
-              <tr>
-                <td class="mono">${fmt.ts(s.started)}</td>
-                <td><a href="#/sessions/${encodeURIComponent(s.session_id)}">${fmt.htmlSafe(s.project_name || s.project_slug)}</a></td>
-                <td class="num">${fmt.compact(s.tokens)}</td>
-              </tr>`).join('') || '<tr><td colspan="3" class="muted">no sessions in this range</td></tr>'}
-          </tbody>
-        </table>
-      </div>
+    <div class="card" style="margin-top:16px">
+      <h3 style="display:flex;align-items:center;margin:0 0 14px">
+        <span>Recent sessions</span>
+        <span class="spacer"></span>
+        <a href="#/sessions" style="font-family:var(--sans);font-weight:500;font-size:12px">all →</a>
+      </h3>
+      <table>
+        <thead>
+          <tr>
+            <th>Started</th>
+            <th>Project</th>
+            <th class="num">Turns</th>
+            <th class="num">Tokens</th>
+            <th>Health</th>
+          </tr>
+        </thead>
+        <tbody>
+          ${sessions.length === 0
+            ? '<tr><td colspan="5" class="muted">No sessions in this range.</td></tr>'
+            : sessions.map(s => {
+                const score = healthById.get(s.session_id);
+                return `
+                <tr>
+                  <td class="mono">${fmt.ts(s.started)}</td>
+                  <td><a href="#/sessions/${encodeURIComponent(s.session_id)}">${fmt.htmlSafe(s.project_name || s.project_slug)}</a></td>
+                  <td class="num">${fmt.int(s.turns)}</td>
+                  <td class="num">${fmt.compact(s.tokens)}</td>
+                  <td>${score == null ? '<span class="muted">—</span>' : healthBadge(score)}</td>
+                </tr>`;
+              }).join('')}
+        </tbody>
+      </table>
     </div>
   `;
 
-  // range buttons
+  // Range buttons
   root.querySelectorAll('.range-tabs button').forEach(btn => {
     btn.addEventListener('click', () => writeRange(btn.dataset.range));
   });
 
-  // Your daily work — billable tokens (input + output + cache create)
-  stackedBarChart(document.getElementById('ch-daily-billable'), {
-    categories: daily.map(d => d.day),
-    series: [
-      { name: 'input',        values: daily.map(d => d.input_tokens),        color: '#4A9EFF' },
-      { name: 'output',       values: daily.map(d => d.output_tokens),       color: '#7C5CFF' },
-      { name: 'cache create', values: daily.map(d => d.cache_create_tokens), color: '#E8A23B' },
+  // Counter animations
+  animateCounter(document.getElementById('m-tokens'),   billable,           { format: v => compact(v) });
+  animateCounter(document.getElementById('m-sessions'), totals.sessions || 0);
+  animateCounter(document.getElementById('m-cost'),     Number(totals.cost_usd || 0),
+    { format: v => '$' + v.toFixed(2) });
+
+  // Daily token burn — area chart with threshold lines
+  const burnPerDay = daily.map(d =>
+    (d.input_tokens || 0) +
+    (d.output_tokens || 0) +
+    (d.cache_create_tokens || 0)
+  );
+  areaChartWithThresholds(document.getElementById('ch-daily-burn'), {
+    x: daily.map(d => d.day),
+    values: burnPerDay,
+    color: '#19F58C',
+    thresholds: [
+      { value: 120000, color: '#FFD600', label: '120K warning' },
+      { value: 250000, color: '#FF423D', label: '250K danger' },
     ],
   });
 
-  // Daily cache reads (separate — scale is 100× larger)
-  stackedBarChart(document.getElementById('ch-daily-cache'), {
-    categories: daily.map(d => d.day),
-    series: [
-      { name: 'cache read', values: daily.map(d => d.cache_read_tokens), color: '#3FB68B' },
-    ],
+  // Tokens by project (horizontal bar)
+  const topProjects = projects.slice(0, 8).map(p => {
+    const name = p.project_name || p.project_slug || '—';
+    const label = name.length > 28 ? name.slice(0, 27) + '…' : name;
+    const tokens = (p.billable_tokens != null)
+      ? p.billable_tokens
+      : (p.input_tokens || 0) + (p.output_tokens || 0);
+    return { label, tokens };
+  });
+  horizontalBarChart(document.getElementById('ch-projects'), {
+    categories: topProjects.map(p => p.label),
+    values: topProjects.map(p => p.tokens),
+    color: '#19F58C',
   });
 
-  // by-model doughnut
+  // Model distribution donut
   donutChart(document.getElementById('ch-model'),
     byModel.map(m => ({
       name: fmt.modelShort(m.model) || 'unknown',
@@ -165,32 +317,11 @@ export default async function (root) {
            + (m.cache_create_5m_tokens || 0) + (m.cache_create_1h_tokens || 0),
     })).filter(d => d.value > 0),
   );
-
-  // tokens by project — input vs output
-  const topProjects = projects.slice(0, 8);
-  groupedBarChart(document.getElementById('ch-projects'), {
-    categories: topProjects.map(p => {
-      const name = p.project_name || p.project_slug;
-      return name.length > 20 ? name.slice(0, 19) + '…' : name;
-    }),
-    series: [
-      { name: 'input',  values: topProjects.map(p => p.input_tokens  || 0), color: '#4A9EFF' },
-      { name: 'output', values: topProjects.map(p => p.output_tokens || 0), color: '#7C5CFF' },
-    ],
-  });
-
-  // top tools
-  const topTools = tools.slice(0, 8);
-  barChart(document.getElementById('ch-tools'), {
-    categories: topTools.map(t => t.tool_name),
-    values: topTools.map(t => t.calls),
-    color: '#7C5CFF',
-  });
 }
 
-function planSubtitle() {
+function planSub() {
   if (!state.pricing || state.plan === 'api') return '';
   const p = state.pricing.plans[state.plan];
   if (!p || !p.monthly) return '';
-  return `<div class="sub">pay $${p.monthly}/mo on ${fmt.htmlSafe(p.label)}</div>`;
+  return `<div class="sub">on ${fmt.htmlSafe(p.label)} · $${p.monthly}/mo</div>`;
 }
