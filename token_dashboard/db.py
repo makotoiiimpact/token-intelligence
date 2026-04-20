@@ -72,6 +72,17 @@ CREATE TABLE IF NOT EXISTS dismissed_tips (
   tip_key       TEXT PRIMARY KEY,
   dismissed_at  REAL NOT NULL
 );
+
+CREATE TABLE IF NOT EXISTS ai_analyses (
+  id             INTEGER PRIMARY KEY AUTOINCREMENT,
+  session_id     TEXT,
+  analysis_type  TEXT NOT NULL,
+  analysis_json  TEXT NOT NULL,
+  analyzed_at    REAL NOT NULL,
+  model_used     TEXT
+);
+CREATE INDEX IF NOT EXISTS idx_ai_analyses_session ON ai_analyses(session_id, analysis_type);
+CREATE INDEX IF NOT EXISTS idx_ai_analyses_type    ON ai_analyses(analysis_type);
 """
 
 
