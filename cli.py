@@ -35,7 +35,12 @@ def cmd_scan(args):
     db = _db_path(args)
     init_db(db)
     n = scan_dir(_projects(args), db)
+    from token_dashboard.health_score import recompute_health
+    from token_dashboard.tips_engine import recompute_tips
+    hn = recompute_health(db)
+    tn = recompute_tips(db)
     print(f"Token Dashboard: scanned {n['files']} files, {n['messages']} messages, {n['tools']} tool calls")
+    print(f"  recomputed {hn} session health rows, {tn} tips")
 
 
 def cmd_today(args):

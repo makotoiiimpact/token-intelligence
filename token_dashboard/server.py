@@ -16,7 +16,11 @@ from .db import (
     daily_token_breakdown, model_breakdown, skill_breakdown,
 )
 from .pricing import load_pricing, cost_for, get_plan, set_plan
-from .tips import all_tips, dismiss_tip
+from .tips import dismiss_tip
+from .tips_engine import recompute_tips
+from .health_score import (
+    session_breakdown, recompute_health, discipline_aggregate,
+)
 from .scanner import scan_dir
 from .skills import cached_catalog
 
@@ -138,7 +142,30 @@ def build_handler(db_path: str, projects_dir: str):
                 sid = path.rsplit("/", 1)[1]
                 return _send_json(self, session_turns(db_path, sid))
             if path == "/api/tips":
-                return _send_json(self, all_tips(db_path))
+                with __import__("sqlite3").connect(db_path) as conn:
+                    conn.row_factory = __import__("sqlite3").Row
+                    rows = [dict(r) for r in conn.execute(
+                        "SELECT id, rule_id, severity, session_id, message, "
+                        "estimated_savings, created_at FROM tips "
+                        "ORDER BY estimated_savings DESC, id ASC"
+                    )]
+                for r in rows:
+                    r["key"] = f"{r['rule_id']}:{r['session_id'] or 'global'}"
+                return _send_json(self, rows)
+            if path == "/api/health":
+                with __import__("sqlite3").connect(db_path) as conn:
+                    conn.row_factory = __import__("sqlite3").Row
+                    rows = [dict(r) for r in conn.execute(
+                        "SELECT session_id, health_score, turn_count, total_tokens, "
+                        "correction_cycles, cache_hit_rate, computed_at FROM session_health "
+                        "ORDER BY computed_at DESC"
+                    )]
+                return _send_json(self, rows)
+            if path.startswith("/api/health/"):
+                sid = path.rsplit("/", 1)[1]
+                return _send_json(self, session_breakdown(db_path, sid))
+            if path == "/api/discipline":
+                return _send_json(self, discipline_aggregate(db_path))
             if path == "/api/plan":
                 return _send_json(self, {"plan": get_plan(db_path), "pricing": pricing})
             if path == "/api/scan":
@@ -195,6 +222,11 @@ def _scan_loop(db_path: str, projects_dir: str, interval: float = 30.0):
         try:
             n = scan_dir(projects_dir, db_path)
             if n["messages"] > 0:
+                try:
+                    recompute_health(db_path)
+                    recompute_tips(db_path)
+                except Exception as e:
+                    EVENTS.put({"type": "error", "message": f"recompute: {e}"})
                 EVENTS.put({"type": "scan", "n": n, "ts": time.time()})
         except Exception as e:
             EVENTS.put({"type": "error", "message": str(e)})
