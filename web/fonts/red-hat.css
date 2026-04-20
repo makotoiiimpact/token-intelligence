@@ -1,0 +1,56 @@
+@font-face {
+  font-family: 'Red Hat Display';
+  font-style: normal;
+  font-weight: 300;
+  font-display: swap;
+  src: url(./8vIQ7wUr0m80wwYf0QCXZzYzUoTQ_zSmZYo.woff2) format('woff2');
+}
+@font-face {
+  font-family: 'Red Hat Display';
+  font-style: normal;
+  font-weight: 400;
+  font-display: swap;
+  src: url(./8vIQ7wUr0m80wwYf0QCXZzYzUoTQ_zSmZYo.woff2) format('woff2');
+}
+@font-face {
+  font-family: 'Red Hat Display';
+  font-style: normal;
+  font-weight: 500;
+  font-display: swap;
+  src: url(./8vIQ7wUr0m80wwYf0QCXZzYzUoTQ_zSmZYo.woff2) format('woff2');
+}
+@font-face {
+  font-family: 'Red Hat Display';
+  font-style: normal;
+  font-weight: 700;
+  font-display: swap;
+  src: url(./8vIQ7wUr0m80wwYf0QCXZzYzUoTQ_zSmZYo.woff2) format('woff2');
+}
+@font-face {
+  font-family: 'Red Hat Mono';
+  font-style: normal;
+  font-weight: 400;
+  font-display: swap;
+  src: url(./jVyN7nDnA2uf2zVvFAhhzEskWuZV_g0.woff2) format('woff2');
+}
+@font-face {
+  font-family: 'Red Hat Mono';
+  font-style: normal;
+  font-weight: 500;
+  font-display: swap;
+  src: url(./jVyN7nDnA2uf2zVvFAhhzEskWuZV_g0.woff2) format('woff2');
+}
+@font-face {
+  font-family: 'Red Hat Text';
+  font-style: normal;
+  font-weight: 400;
+  font-display: swap;
+  src: url(./RrQXbohi_ic6B3yVSzGBrMxgaq0qE80.woff2) format('woff2');
+}
+@font-face {
+  font-family: 'Red Hat Text';
+  font-style: normal;
+  font-weight: 500;
+  font-display: swap;
+  src: url(./RrQXbohi_ic6B3yVSzGBrMxgaq0qE80.woff2) format('woff2');
+}
