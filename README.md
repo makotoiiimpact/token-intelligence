@@ -17,6 +17,22 @@ Reads the JSONL transcripts Claude Code writes to `~/.claude/projects/` and turn
 - **Session Discipline tab** — 220px circular health ring, 30-session score trend chart with 80 / 50 threshold bands, habit tracker grid, rules-based recommendations driven by real aggregates.
 - **CSV export + threshold customization** — export every session's health + discipline data, and tune the warning / danger token thresholds via a slider in Settings (persists to localStorage; Overview + Sessions charts pick it up on next render).
 
+## Screenshots
+
+_Screenshots below are placeholders — drop PNGs at the paths shown to replace them._
+
+### Overview
+![Overview tab — hero metrics, daily token burn with threshold bands, Quick Wins, per-project and per-model charts, recent sessions with health badges](docs/screenshots/overview.png)
+
+### AI Recos
+![AI Recos tab — severity filter pills, reco cards with left-border accents, Analyze-with-AI glass panel](docs/screenshots/ai-recos.png)
+
+### Session Discipline
+![Session Discipline tab — 220px circular health ring, 30-session score trend chart, habit tracker grid, recommendations panel](docs/screenshots/discipline.png)
+
+### Sessions (detail view)
+![Sessions detail view — compound-token accumulation chart with 120K/250K threshold markers and correction dots, per-turn table, Autopsy-with-AI button](docs/screenshots/sessions.png)
+
 ## What this is useful for
 
 - Seeing which of your prompts are expensive (surprise: they usually involve large tool results).
@@ -174,4 +190,4 @@ Data flow: `cli.py` → `token_dashboard/scanner.py` → SQLite DB → `token_da
 
 ## License
 
-[MIT](LICENSE). Upstream © its respective authors; IIIMPACT modifications © Makoto Kern / IIIMPACT.
+[MIT](LICENSE). © 2026 IIIMPACT LLC. Portions based on [token-dashboard](https://github.com/nateherkai/token-dashboard), MIT licensed.
