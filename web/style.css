@@ -339,11 +339,20 @@ main#app {
   .row.cols-4 { grid-template-columns: repeat(2, minmax(0, 1fr)); }
   .row.cols-2-wide { grid-template-columns: 1fr; }
 }
+@media (max-width: 900px) {
+  /* 3-col grids get cramped below 900 (card < 280px) — drop to 2. */
+  .row.cols-3 { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  /* Habit-tracker label column is 200px — shrink before we overflow. */
+  .habit-grid { grid-template-columns: 140px 1fr; }
+}
 @media (max-width: 720px) {
   main#app { padding: 18px; }
   .row.cols-7, .row.cols-4, .row.cols-3, .row.cols-2 { grid-template-columns: 1fr; }
   .topbar { padding: 14px 18px; gap: 10px; }
   .topbar nav { flex-wrap: wrap; }
+  .health-ring-lg { width: 180px; height: 180px; }
+  .health-ring-lg .num { font-size: 56px; }
+  .metric .value { font-size: 40px; }
 }
 
 /* ---------- Hero metric card ---------- */

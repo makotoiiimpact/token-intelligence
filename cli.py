@@ -9,7 +9,7 @@ from pathlib import Path
 
 from token_dashboard.db import init_db, default_db_path, overview_totals
 from token_dashboard.scanner import scan_dir
-from token_dashboard.tips import all_tips
+from token_dashboard.tips_engine import all_tips
 
 
 def _db_path(args) -> str:
@@ -68,11 +68,15 @@ def cmd_tips(args):
     init_db(db)
     tips = all_tips(db)
     if not tips:
-        print("Token Dashboard: no suggestions")
+        print("Token Intelligence: no recommendations")
         return
     for tip in tips:
-        print(f"[{tip['category']}] {tip['title']}")
-        print(f"  {tip['body']}\n")
+        savings = tip.get("estimated_savings") or 0
+        header = f"[{tip['severity']}] {tip['rule_id']}"
+        if savings:
+            header += f"  (~{savings:,} saved)"
+        print(header)
+        print(f"  {tip['message']}\n")
 
 
 def cmd_dashboard(args):

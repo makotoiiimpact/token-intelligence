@@ -16,7 +16,6 @@ from .db import (
     daily_token_breakdown, model_breakdown, skill_breakdown,
 )
 from .pricing import load_pricing, cost_for, get_plan, set_plan
-from .tips import dismiss_tip
 from .tips_engine import recompute_tips
 from .health_score import (
     session_breakdown, recompute_health, discipline_aggregate,
@@ -220,9 +219,6 @@ def build_handler(db_path: str, projects_dir: str):
                 return _send_error(self, 400, "body must be a JSON object")
             if url.path == "/api/plan":
                 set_plan(db_path, body.get("plan", "api"))
-                return _send_json(self, {"ok": True})
-            if url.path == "/api/tips/dismiss":
-                dismiss_tip(db_path, body.get("key", ""))
                 return _send_json(self, {"ok": True})
             if url.path == "/api/analyze" or url.path.startswith("/api/analyze/"):
                 force = body.get("force") is True
