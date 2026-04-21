@@ -19,8 +19,6 @@ Reads the JSONL transcripts Claude Code writes to `~/.claude/projects/` and turn
 
 ## Screenshots
 
-_Screenshots below are placeholders — drop PNGs at the paths shown to replace them._
-
 ### Overview
 ![Overview tab — hero metrics, daily token burn with threshold bands, Quick Wins, per-project and per-model charts, recent sessions with health badges](docs/screenshots/overview.png)
 
