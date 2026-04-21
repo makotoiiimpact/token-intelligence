@@ -201,7 +201,7 @@ export default async function (root) {
     ${heroMetrics}
 
     <div class="row cols-2-wide" style="margin-top:16px">
-      <div class="card">
+      <div class="card card-burn">
         <div class="flex" style="margin-bottom:12px">
           <h3 style="margin:0">Daily token burn</h3>
           <span class="spacer"></span>
@@ -212,7 +212,7 @@ export default async function (root) {
         </div>
         <div id="ch-daily-burn" style="height:280px"></div>
       </div>
-      <div class="card">
+      <div class="card card-wins-atmos">
         <h3 style="display:flex;align-items:center;margin:0">
           <span>Quick wins</span>
           <span class="spacer"></span>
@@ -224,19 +224,19 @@ export default async function (root) {
     </div>
 
     <div class="row cols-2" style="margin-top:16px">
-      <div class="card">
+      <div class="card card-projects-atmos">
         <h3>Tokens by project</h3>
         <p class="muted" style="margin:-4px 0 10px;font-size:12px">Top 8 projects by billable tokens.</p>
         <div id="ch-projects" style="height:320px"></div>
       </div>
-      <div class="card">
+      <div class="card card-model-atmos">
         <h3>Model distribution</h3>
         <p class="muted" style="margin:-4px 0 4px;font-size:12px">Share of billable tokens per Claude model.</p>
         <div id="ch-model" style="height:300px"></div>
       </div>
     </div>
 
-    <div class="card" style="margin-top:16px">
+    <div class="card card-sessions-atmos" style="margin-top:16px">
       <h3 style="display:flex;align-items:center;margin:0 0 14px">
         <span>Recent sessions</span>
         <span class="spacer"></span>

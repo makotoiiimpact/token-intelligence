@@ -157,11 +157,12 @@ main#app {
 
 /* ---------- Cards ---------- */
 .card {
-  /* Diagonal glass wash: bright top-left, fading into near-transparent. */
+  position: relative;
+  /* Cool-blue atmospheric wash — every card gets a subtle cold cast. */
   background: linear-gradient(
     135deg,
-    rgba(255, 255, 255, 0.12) 0%,
-    rgba(255, 255, 255, 0.03) 100%
+    rgba(100, 140, 255, 0.08) 0%,
+    rgba(255, 255, 255, 0.02) 100%
   );
   border: 1px solid var(--card-border);
   border-radius: var(--r-card);
@@ -179,12 +180,71 @@ main#app {
   transform: translateY(-2px);
   background: linear-gradient(
     135deg,
-    rgba(255, 255, 255, 0.18) 0%,
+    rgba(100, 140, 255, 0.14) 0%,
     rgba(255, 255, 255, 0.03) 100%
   );
   box-shadow:
     inset 0 1px 0 rgba(255, 255, 255, 0.12),
     0 8px 32px rgba(0, 0, 0, 0.4);
+}
+
+/* -- Atmospheric card variants (Overview tab) -- */
+
+/* Daily token burn: blue-tinted base + bottom-center blue swell +
+   rainbow spectrum strip at the bottom edge with an upward green glow. */
+.card-burn {
+  background:
+    linear-gradient(135deg, rgba(100, 140, 255, 0.08) 0%, rgba(255, 255, 255, 0.02) 100%),
+    radial-gradient(ellipse at bottom center, rgba(0, 102, 255, 0.10) 0%, transparent 50%);
+}
+.card-burn::after {
+  content: "";
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  height: 3px;
+  border-radius: 0 0 var(--r-card) var(--r-card);
+  background: linear-gradient(90deg,
+    #FF423D 0%,
+    #FFD600 20%,
+    #19F58C 40%,
+    #00FFE0 60%,
+    #0066FF 80%,
+    #8F00FF 100%);
+  box-shadow: 0 -20px 40px rgba(25, 245, 140, 0.08);
+  pointer-events: none;
+}
+
+/* Quick wins: blue → purple atmospheric wash + top-right blue radial. */
+.card-wins-atmos {
+  background:
+    linear-gradient(135deg,
+      rgba(0, 102, 255, 0.10) 0%,
+      rgba(143, 0, 255, 0.08) 50%,
+      transparent 100%),
+    radial-gradient(ellipse at top right, rgba(0, 102, 255, 0.08) 0%, transparent 60%);
+}
+
+/* Tokens by project: cool base + green bleed in the bottom-left corner. */
+.card-projects-atmos {
+  background:
+    linear-gradient(135deg, rgba(100, 140, 255, 0.08) 0%, rgba(255, 255, 255, 0.02) 100%),
+    radial-gradient(ellipse at bottom left, rgba(25, 245, 140, 0.06) 0%, transparent 55%);
+}
+
+/* Model distribution: cool base + purple bleed in the bottom-right corner. */
+.card-model-atmos {
+  background:
+    linear-gradient(135deg, rgba(100, 140, 255, 0.08) 0%, rgba(255, 255, 255, 0.02) 100%),
+    radial-gradient(ellipse at bottom right, rgba(143, 0, 255, 0.06) 0%, transparent 55%);
+}
+
+/* Recent sessions: cool base + soft cyan bottom glow. */
+.card-sessions-atmos {
+  background:
+    linear-gradient(135deg, rgba(100, 140, 255, 0.08) 0%, rgba(255, 255, 255, 0.02) 100%),
+    radial-gradient(ellipse at bottom center, rgba(0, 255, 224, 0.06) 0%, transparent 50%);
 }
 
 /* Hero metric card tints — accent diagonal + corner-bleed radial. */
