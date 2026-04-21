@@ -31,18 +31,31 @@ export async function api(path, opts) {
 
 export const state = { plan: 'api', pricing: null };
 
+// Token thresholds — user-customizable via Settings. Stored in localStorage.
+export function getThresholds() {
+  const warn = Number(localStorage.getItem('td.threshold.warn')) || 120000;
+  const danger = Number(localStorage.getItem('td.threshold.danger')) || 250000;
+  return { warn, danger };
+}
+export function setThresholds({ warn, danger }) {
+  if (warn   != null) localStorage.setItem('td.threshold.warn',   String(Math.round(warn)));
+  if (danger != null) localStorage.setItem('td.threshold.danger', String(Math.round(danger)));
+}
+
 const ROUTES = {
-  '/overview':  () => import('/web/routes/overview.js'),
-  '/prompts':   () => import('/web/routes/prompts.js'),
-  '/sessions':  () => import('/web/routes/sessions.js'),
-  '/projects':  () => import('/web/routes/projects.js'),
-  '/skills':    () => import('/web/routes/skills.js'),
-  '/ai-recos':  () => import('/web/routes/tips.js'),
-  '/settings':  () => import('/web/routes/settings.js'),
+  '/overview':   () => import('/web/routes/overview.js'),
+  '/prompts':    () => import('/web/routes/prompts.js'),
+  '/sessions':   () => import('/web/routes/sessions.js'),
+  '/projects':   () => import('/web/routes/projects.js'),
+  '/skills':     () => import('/web/routes/skills.js'),
+  '/ai-recos':   () => import('/web/routes/tips.js'),
+  '/discipline': () => import('/web/routes/discipline.js'),
+  '/settings':   () => import('/web/routes/settings.js'),
 };
 
 const ROUTE_LABELS = {
-  '/ai-recos': 'AI Recos',
+  '/ai-recos':   'AI Recos',
+  '/discipline': 'Discipline',
 };
 
 function labelFor(route) {

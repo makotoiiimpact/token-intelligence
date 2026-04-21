@@ -1,4 +1,4 @@
-import { api, fmt, state } from '/web/app.js';
+import { api, fmt, state, getThresholds } from '/web/app.js';
 import { areaChartWithThresholds, horizontalBarChart, donutChart } from '/web/charts.js';
 
 const RANGES = [
@@ -206,8 +206,8 @@ export default async function (root) {
           <h3 style="margin:0">Daily token burn</h3>
           <span class="spacer"></span>
           <span class="muted" style="font-size:11px;font-family:var(--mono)">
-            <span style="color:var(--yellow)">— 120K</span>
-            &nbsp;&nbsp;<span style="color:var(--red)">— 250K</span>
+            <span style="color:var(--yellow)">— ${Math.round(getThresholds().warn / 1000)}K</span>
+            &nbsp;&nbsp;<span style="color:var(--red)">— ${Math.round(getThresholds().danger / 1000)}K</span>
           </span>
         </div>
         <div id="ch-daily-burn" style="height:280px"></div>
@@ -288,13 +288,14 @@ export default async function (root) {
     (d.output_tokens || 0) +
     (d.cache_create_tokens || 0)
   );
+  const { warn: tWarn, danger: tDanger } = getThresholds();
   areaChartWithThresholds(document.getElementById('ch-daily-burn'), {
     x: daily.map(d => d.day),
     values: burnPerDay,
     color: '#19F58C',
     thresholds: [
-      { value: 120000, color: '#FFD600', label: '120K warning' },
-      { value: 250000, color: '#FF423D', label: '250K danger' },
+      { value: tWarn,   color: '#FFD600', label: `${Math.round(tWarn / 1000)}K warning` },
+      { value: tDanger, color: '#FF423D', label: `${Math.round(tDanger / 1000)}K danger` },
     ],
   });
 

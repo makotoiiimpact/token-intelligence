@@ -271,6 +271,155 @@ export function groupedBarChart(el, { categories, series, formatter }) {
   return c;
 }
 
+/**
+ * Score-trend chart: category x-axis, value y-axis (0..100),
+ * segment colors green/yellow/red by value, threshold bands.
+ */
+export function scoreTrendChart(el, { x, values }) {
+  const c = mount(el);
+  const colorFor = v => v >= 80 ? '#19F58C' : v >= 50 ? '#FFD600' : '#FF423D';
+  const pieces = [
+    { gt: -1, lte: 49,  color: '#FF423D' },
+    { gt: 49, lte: 79,  color: '#FFD600' },
+    { gt: 79, lte: 100, color: '#19F58C' },
+  ];
+  c.setOption({
+    ...BASE,
+    tooltip: {
+      ...TOOLTIP,
+      valueFormatter: v => Math.round(v) + ' / 100',
+    },
+    xAxis: {
+      ...X_AXIS, type: 'category', data: x, boundaryGap: false,
+      axisLabel: {
+        ...X_AXIS.axisLabel,
+        interval: x.length > 20 ? 'auto' : 0,
+        rotate: x.length > 14 ? 30 : 0,
+      },
+    },
+    yAxis: {
+      ...Y_AXIS, type: 'value', min: 0, max: 100,
+      axisLabel: { ...Y_AXIS.axisLabel, formatter: v => v },
+    },
+    visualMap: {
+      show: false, pieces, dimension: 1, outOfRange: { color: '#FF423D' },
+    },
+    series: [{
+      type: 'line',
+      data: values,
+      smooth: true,
+      showSymbol: true,
+      symbolSize: 5,
+      itemStyle: { color: v => colorFor(v.value?.[1] ?? v.value ?? 0) },
+      lineStyle: { width: 2 },
+      areaStyle: {
+        color: {
+          type: 'linear', x: 0, y: 0, x2: 0, y2: 1,
+          colorStops: [
+            { offset: 0, color: 'rgba(25, 245, 140, 0.22)' },
+            { offset: 1, color: 'rgba(25, 245, 140, 0)' },
+          ],
+        },
+      },
+      markLine: {
+        symbol: ['none', 'none'],
+        silent: true,
+        lineStyle: { type: 'dashed', width: 1 },
+        label: {
+          position: 'insideEndTop',
+          fontFamily: 'Red Hat Mono', fontSize: 10,
+        },
+        data: [
+          { yAxis: 80, lineStyle: { color: '#19F58C' }, label: { formatter: '80 good', color: '#19F58C' } },
+          { yAxis: 50, lineStyle: { color: '#FFD600' }, label: { formatter: '50 warn', color: '#FFD600' } },
+        ],
+      },
+    }],
+  });
+  return c;
+}
+
+/**
+ * Compound-token accumulation chart for a single session.
+ * values: cumulative tokens per turn. markers: {turn, label, color} for
+ * correction cycles / thresholds.
+ */
+export function cumulativeAreaChart(el, { x, values, markers = [], thresholds = [] }) {
+  const c = mount(el);
+  c.setOption({
+    ...BASE,
+    tooltip: {
+      ...TOOLTIP,
+      valueFormatter: v => Number(v).toLocaleString() + ' tokens',
+    },
+    xAxis: {
+      ...X_AXIS, type: 'category', data: x, boundaryGap: false,
+      axisLabel: {
+        ...X_AXIS.axisLabel,
+        interval: x.length > 40 ? 'auto' : 0,
+      },
+      name: 'turn', nameLocation: 'middle', nameGap: 26,
+      nameTextStyle: { color: 'rgba(255,255,255,0.4)', fontFamily: 'Red Hat Text' },
+    },
+    yAxis: {
+      ...Y_AXIS, type: 'value',
+      axisLabel: {
+        ...Y_AXIS.axisLabel,
+        formatter: v => {
+          const n = Math.abs(v);
+          if (n >= 1e9) return (v / 1e9).toFixed(1) + 'B';
+          if (n >= 1e6) return (v / 1e6).toFixed(1) + 'M';
+          if (n >= 1e3) return (v / 1e3).toFixed(0) + 'K';
+          return v;
+        },
+      },
+    },
+    series: [{
+      type: 'line',
+      data: values,
+      smooth: true,
+      showSymbol: false,
+      lineStyle: { width: 2, color: '#19F58C' },
+      areaStyle: {
+        color: {
+          type: 'linear', x: 0, y: 0, x2: 0, y2: 1,
+          colorStops: [
+            { offset: 0, color: 'rgba(25, 245, 140, 0.40)' },
+            { offset: 1, color: 'rgba(25, 245, 140, 0)' },
+          ],
+        },
+      },
+      markPoint: markers.length ? {
+        symbol: 'circle',
+        symbolSize: 10,
+        itemStyle: { borderColor: '#000', borderWidth: 2 },
+        label: { show: false },
+        data: markers.map(m => ({
+          name: m.label || 'correction',
+          xAxis: String(m.turn),
+          yAxis: m.value ?? 0,
+          itemStyle: { color: m.color || '#FF423D' },
+        })),
+      } : undefined,
+      markLine: thresholds.length ? {
+        symbol: ['none', 'none'],
+        silent: true,
+        lineStyle: { type: 'dashed', width: 1.5 },
+        label: {
+          position: 'insideEndTop',
+          fontFamily: 'Red Hat Mono', fontSize: 10,
+        },
+        data: thresholds.map(t => ({
+          yAxis: t.value,
+          lineStyle: { color: t.color },
+          label: { formatter: t.label || '', color: t.color },
+        })),
+      } : undefined,
+    }],
+  });
+  return c;
+}
+
 export function donutChart(el, data) {
   const c = mount(el);
   c.setOption({

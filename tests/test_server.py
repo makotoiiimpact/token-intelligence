@@ -75,6 +75,11 @@ class ServerTests(unittest.TestCase):
             self.assertEqual(resp.status, 200)
             self.assertEqual(resp.read(), b"")
 
+    def test_ai_status(self):
+        body = json.loads(self._get("/api/ai/status"))
+        self.assertIn("configured", body)
+        self.assertIsInstance(body["configured"], bool)
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -173,6 +173,12 @@ def build_handler(db_path: str, projects_dir: str):
                 return _send_json(self, session_breakdown(db_path, sid))
             if path == "/api/discipline":
                 return _send_json(self, discipline_aggregate(db_path))
+            if path == "/api/ai/status":
+                # Zero-side-effect check: does ANTHROPIC_API_KEY exist?
+                import os as _os
+                return _send_json(self, {
+                    "configured": bool(_os.environ.get("ANTHROPIC_API_KEY", "").strip()),
+                })
             if path == "/api/plan":
                 return _send_json(self, {"plan": get_plan(db_path), "pricing": pricing})
             if path == "/api/scan":
