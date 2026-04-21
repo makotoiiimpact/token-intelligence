@@ -4,10 +4,10 @@ export default async function (root) {
   const tips = await api('/api/tips');
   root.innerHTML = `
     <div class="card">
-      <h2>Suggestions</h2>
+      <h2>AI Recos</h2>
       ${tips.length === 0
-        ? '<p class="muted">No suggestions right now. Token Dashboard surfaces patterns weekly — check back after more activity.</p>'
-        : `<p class="muted" style="margin:-8px 0 14px">Rule-based pattern detection over the last 7 days. Dismissed tips re-appear after 14 days.</p>`}
+        ? '<p class="muted">No recommendations right now. Token Intelligence surfaces patterns weekly — check back after more activity.</p>'
+        : `<p class="muted" style="margin:-8px 0 14px">Rule-based pattern detection over the last 7 days. Dismissed recommendations re-appear after 14 days.</p>`}
       ${tips.map(t => `
         <div class="tip">
           <div class="tip-head">

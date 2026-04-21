@@ -144,20 +144,20 @@ export default async function (root) {
       ${RANGES.map(r => `<button data-range="${r.key}" class="${r.key === range.key ? 'active' : ''}">${r.label}</button>`).join('')}
     </div>`;
 
-  // Hero metrics — 4 cards
+  // Hero metrics — 4 cards (each gets a subtle accent tint)
   const heroMetrics = `
     <div class="row cols-4">
-      <div class="card metric">
+      <div class="card card-tint-green metric">
         <div class="label">Total tokens</div>
         <div class="value" id="m-tokens" title="${fmt.int(billable)} billable tokens">0</div>
         <div class="sub">input + output + cache create</div>
       </div>
-      <div class="card metric">
+      <div class="card card-tint-blue metric">
         <div class="label">Sessions</div>
         <div class="value" id="m-sessions" title="${fmt.int(totals.sessions)}">0</div>
         <div class="sub">${fmt.int(totals.turns)} turns total</div>
       </div>
-      <div class="card card-highlight" style="display:flex;align-items:center;gap:20px">
+      <div class="card card-tint-cyan" style="display:flex;align-items:center;gap:20px">
         ${healthRing(avgHealth)}
         <div class="metric" style="gap:6px">
           <div class="label">Avg health</div>
@@ -168,16 +168,16 @@ export default async function (root) {
           </div>
         </div>
       </div>
-      <div class="card metric good">
+      <div class="card card-tint-purple metric good">
         <div class="label">Est. cost</div>
         <div class="value" id="m-cost" title="${fmt.usd(totals.cost_usd)}">—</div>
         ${planSub()}
       </div>
     </div>`;
 
-  // Quick Wins panel
+  // Quick Wins panel (surfaces top 3 AI Recos)
   const quickWinsHtml = quickWins.length === 0
-    ? `<p class="muted" style="margin:0;font-size:13px">No tips detected — nice hygiene. Run a fresh scan to recompute.</p>`
+    ? `<p class="muted" style="margin:0;font-size:13px">No recommendations detected — nice hygiene. Run a fresh scan to recompute.</p>`
     : quickWins.map(t => `
         <div class="quickwin ${severityFromTip(t.severity)}">
           <span class="dot"></span>
@@ -213,8 +213,12 @@ export default async function (root) {
         <div id="ch-daily-burn" style="height:280px"></div>
       </div>
       <div class="card">
-        <h3>Quick wins</h3>
-        <p class="muted" style="margin:-4px 0 10px;font-size:12px">Top tips by estimated savings.</p>
+        <h3 style="display:flex;align-items:center;margin:0">
+          <span>Quick wins</span>
+          <span class="spacer"></span>
+          <a href="#/ai-recos" style="font-family:var(--sans);font-weight:500;font-size:12px">all →</a>
+        </h3>
+        <p class="muted" style="margin:6px 0 10px;font-size:12px">Top recommendations by estimated savings.</p>
         ${quickWinsHtml}
       </div>
     </div>

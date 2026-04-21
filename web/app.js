@@ -32,14 +32,23 @@ export async function api(path, opts) {
 export const state = { plan: 'api', pricing: null };
 
 const ROUTES = {
-  '/overview': () => import('/web/routes/overview.js'),
-  '/prompts':  () => import('/web/routes/prompts.js'),
-  '/sessions': () => import('/web/routes/sessions.js'),
-  '/projects': () => import('/web/routes/projects.js'),
-  '/skills':   () => import('/web/routes/skills.js'),
-  '/tips':     () => import('/web/routes/tips.js'),
-  '/settings': () => import('/web/routes/settings.js'),
+  '/overview':  () => import('/web/routes/overview.js'),
+  '/prompts':   () => import('/web/routes/prompts.js'),
+  '/sessions':  () => import('/web/routes/sessions.js'),
+  '/projects':  () => import('/web/routes/projects.js'),
+  '/skills':    () => import('/web/routes/skills.js'),
+  '/ai-recos':  () => import('/web/routes/tips.js'),
+  '/settings':  () => import('/web/routes/settings.js'),
 };
+
+const ROUTE_LABELS = {
+  '/ai-recos': 'AI Recos',
+};
+
+function labelFor(route) {
+  if (ROUTE_LABELS[route]) return ROUTE_LABELS[route];
+  return route.slice(1);
+}
 
 function buildTopbar() {
   const wrap = document.createElement('header');
@@ -47,7 +56,7 @@ function buildTopbar() {
   wrap.innerHTML = `
     <div class="brand">Token Intelligence</div>
     <nav>
-      ${Object.keys(ROUTES).map(p => `<a href="#${p}" data-route="${p}">${p.slice(1)}</a>`).join('')}
+      ${Object.keys(ROUTES).map(p => `<a href="#${p}" data-route="${p}">${labelFor(p)}</a>`).join('')}
     </nav>
     <div class="spacer"></div>
     <span class="pill" id="plan-pill">api</span>
