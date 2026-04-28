@@ -152,11 +152,20 @@ def build_handler(db_path: str, projects_dir: str):
                     conn.row_factory = __import__("sqlite3").Row
                     rows = [dict(r) for r in conn.execute(
                         "SELECT id, rule_id, severity, session_id, message, "
-                        "estimated_savings, created_at FROM tips "
-                        "ORDER BY estimated_savings DESC, id ASC"
+                        "estimated_savings, created_at, title, where_text, "
+                        "what_text, how_to_fix, occurred_at, deep_link "
+                        "FROM tips ORDER BY estimated_savings DESC, id ASC"
                     )]
+                from datetime import datetime as _dt, timezone as _tz
                 for r in rows:
                     r["key"] = f"{r['rule_id']}:{r['session_id'] or 'global'}"
+                    r["where"] = r.pop("where_text", None)
+                    r["what"] = r.pop("what_text", None)
+                    epoch = r.get("occurred_at")
+                    r["occurred_at"] = (
+                        _dt.fromtimestamp(epoch, tz=_tz.utc).isoformat()
+                        if isinstance(epoch, (int, float)) else None
+                    )
                 return _send_json(self, rows)
             if path == "/api/health":
                 with __import__("sqlite3").connect(db_path) as conn:

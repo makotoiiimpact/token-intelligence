@@ -5,6 +5,10 @@ All rules share the emit shape: `rule_id`, `severity`, `session_id`, `message`,
 `estimated_savings`, `key`. `key` is a stable `rule_id:session_id|global` string so
 existing dismissal (via the `dismissed_tips` table keyed on `tip_key`) keeps working.
 
+Phase 1 of AI Recos adds structured fields per tip — `title`, `where`, `what`,
+`how_to_fix`, `occurred_at`, `deep_link` — alongside (not replacing) the existing
+prose `message`. Existing fields stay byte-identical; new fields are additive.
+
 Twelve rules across four categories: session hygiene, file & context, cost, prompting.
 Heuristic shortcuts (intentionally simple) are documented inline per rule.
 
@@ -22,7 +26,7 @@ from __future__ import annotations
 
 import re
 import time
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from typing import Callable, List, Optional
 
 from .db import connect
@@ -30,6 +34,8 @@ from .db import connect
 SEVERITY_INFO = "info"
 SEVERITY_WARNING = "warning"
 SEVERITY_CRITICAL = "critical"
+
+TODO_PRESCRIPTION = "TODO: prescription"
 
 
 def _days_ago_iso(days: int) -> str:
@@ -44,6 +50,31 @@ def _tokens_from_chars(n_chars: Optional[int]) -> int:
     if not n_chars:
         return 0
     return n_chars // 4
+
+
+def _session_started_at(conn, session_id: Optional[str]) -> Optional[str]:
+    """Return MIN(messages.timestamp) for `session_id` as an ISO string, or None.
+
+    None for global rules (session_id is None) and when the session has no rows.
+    """
+    if session_id is None:
+        return None
+    row = conn.execute(
+        "SELECT MIN(timestamp) AS t FROM messages WHERE session_id = ?",
+        (session_id,),
+    ).fetchone()
+    return row["t"] if row and row["t"] else None
+
+
+def _iso_to_epoch(iso: Optional[str]) -> Optional[float]:
+    """Parse an ISO-8601 timestamp (with optional trailing Z) to epoch seconds."""
+    if not iso:
+        return None
+    s = iso.replace("Z", "+00:00") if iso.endswith("Z") else iso
+    try:
+        return datetime.fromisoformat(s).timestamp()
+    except ValueError:
+        return None
 
 
 # ---------- SESSION HYGIENE ----------
@@ -62,20 +93,30 @@ def marathon_session(db_path, since_iso: str) -> List[dict]:
     out: List[dict] = []
     with connect(db_path) as c:
         for row in c.execute(sql, (since_iso,)):
+            sid = row["session_id"]
             turns = row["turns"] or 0
             tokens = row["tokens"] or 0
             overage = max(0, tokens - 120000)
             severity = SEVERITY_CRITICAL if tokens > 250000 else SEVERITY_WARNING
+            what = "past 120K, retrieval accuracy drops measurably"
+            how_to_fix = "Handoff earlier"
+            message = (
+                f"Session hit {turns} turns / {tokens:,} tokens. "
+                f"{how_to_fix} — {what}."
+            )
             out.append({
                 "rule_id": "MARATHON_SESSION",
                 "severity": severity,
-                "session_id": row["session_id"],
-                "message": (
-                    f"Session hit {turns} turns / {tokens:,} tokens. "
-                    "Handoff earlier — past 120K, retrieval accuracy drops measurably."
-                ),
+                "session_id": sid,
+                "message": message,
                 "estimated_savings": overage,
-                "key": _key("MARATHON_SESSION", row["session_id"]),
+                "key": _key("MARATHON_SESSION", sid),
+                "title": "Marathon session",
+                "where": f"Session {sid} · {turns:,} turns · {tokens:,} tokens",
+                "what": what,
+                "how_to_fix": how_to_fix,
+                "occurred_at": _session_started_at(c, sid),
+                "deep_link": f"/sessions/{sid}",
             })
     return out
 
@@ -92,25 +133,34 @@ def correction_loops(db_path, since_iso: str) -> List[dict]:
         FROM messages
        WHERE type='user' AND prompt_text IS NOT NULL AND timestamp >= ?
     """
-    counts: dict = {}
+    out: List[dict] = []
     with connect(db_path) as c:
+        counts: dict = {}
         for row in c.execute(sql, (since_iso,)):
             if _CORRECTION_PATTERNS.search(row["prompt_text"] or ""):
                 counts[row["session_id"]] = counts.get(row["session_id"], 0) + 1
-    out: List[dict] = []
-    for sid, n in counts.items():
-        severity = SEVERITY_WARNING if n >= 3 else SEVERITY_INFO
-        out.append({
-            "rule_id": "CORRECTION_LOOPS",
-            "severity": severity,
-            "session_id": sid,
-            "message": (
-                f"{n} correction message(s) detected. Rewinding with /re before "
-                "retrying keeps context clean; failed attempts otherwise linger."
-            ),
-            "estimated_savings": n * 2000,
-            "key": _key("CORRECTION_LOOPS", sid),
-        })
+        for sid, n in counts.items():
+            severity = SEVERITY_WARNING if n >= 3 else SEVERITY_INFO
+            what = "failed attempts otherwise linger"
+            how_to_fix = "Rewinding with /re before retrying keeps context clean"
+            message = (
+                f"{n} correction message(s) detected. "
+                f"{how_to_fix}; {what}."
+            )
+            out.append({
+                "rule_id": "CORRECTION_LOOPS",
+                "severity": severity,
+                "session_id": sid,
+                "message": message,
+                "estimated_savings": n * 2000,
+                "key": _key("CORRECTION_LOOPS", sid),
+                "title": "Correction loops",
+                "where": f"Session {sid} · {n} correction message(s)",
+                "what": what,
+                "how_to_fix": how_to_fix,
+                "occurred_at": _session_started_at(c, sid),
+                "deep_link": f"/sessions/{sid}",
+            })
     return out
 
 
@@ -133,27 +183,35 @@ def task_drift(db_path, since_iso: str) -> List[dict]:
         FROM messages
        WHERE type='user' AND prompt_text IS NOT NULL AND timestamp >= ?
     """
-    vocab: dict = {}
+    out: List[dict] = []
     with connect(db_path) as c:
+        vocab: dict = {}
         for row in c.execute(sql, (since_iso,)):
             tokens = re.findall(r"[a-z][a-z0-9_-]{3,}", (row["prompt_text"] or "").lower())
             s = vocab.setdefault(row["session_id"], set())
             for t in tokens:
                 if t not in _NOUN_STOPWORDS:
                     s.add(t)
-    out: List[dict] = []
-    for sid, s in vocab.items():
-        if len(s) >= 40:
+        for sid, s in vocab.items():
+            if len(s) < 40:
+                continue
+            message = (
+                f"{len(s)} distinct topic tokens in this session — possible task drift. "
+                "One session per job keeps the model focused."
+            )
             out.append({
                 "rule_id": "TASK_DRIFT",
                 "severity": SEVERITY_INFO,
                 "session_id": sid,
-                "message": (
-                    f"{len(s)} distinct topic tokens in this session — possible task drift. "
-                    "One session per job keeps the model focused."
-                ),
+                "message": message,
                 "estimated_savings": 0,
                 "key": _key("TASK_DRIFT", sid),
+                "title": "Task drift",
+                "where": f"Session {sid} · {len(s)} distinct topic tokens",
+                "what": message,
+                "how_to_fix": TODO_PRESCRIPTION,
+                "occurred_at": _session_started_at(c, sid),
+                "deep_link": f"/sessions/{sid}",
             })
     return out
 
@@ -172,17 +230,25 @@ def redundant_reads(db_path, since_iso: str) -> List[dict]:
     out: List[dict] = []
     with connect(db_path) as c:
         for row in c.execute(sql, (since_iso,)):
+            sid = row["session_id"]
+            target = row["target"]
             n = row["n"]
+            what = f"`{target}` was Read {n}x in one session"
+            how_to_fix = "Summarize in CLAUDE.md or read once per session."
+            message = f"{what}. {how_to_fix}"
             out.append({
                 "rule_id": "REDUNDANT_READS",
                 "severity": SEVERITY_WARNING,
-                "session_id": row["session_id"],
-                "message": (
-                    f"`{row['target']}` was Read {n}x in one session. "
-                    "Summarize in CLAUDE.md or read once per session."
-                ),
+                "session_id": sid,
+                "message": message,
                 "estimated_savings": (n - 1) * 2000,
-                "key": _key(f"REDUNDANT_READS:{row['target']}", row["session_id"]),
+                "key": _key(f"REDUNDANT_READS:{target}", sid),
+                "title": "Redundant reads",
+                "where": f"`{target}` · session {sid}",
+                "what": what,
+                "how_to_fix": how_to_fix,
+                "occurred_at": _session_started_at(c, sid),
+                "deep_link": f"/sessions/{sid}",
             })
     return out
 
@@ -197,20 +263,29 @@ def file_bloat(db_path, since_iso: str) -> List[dict]:
     seen: set = set()
     with connect(db_path) as c:
         for row in c.execute(sql, (since_iso,)):
-            k = (row["session_id"], row["target"])
+            sid = row["session_id"]
+            target = row["target"]
+            k = (sid, target)
             if k in seen:
                 continue
             seen.add(k)
+            tokens = row["result_tokens"]
+            what = f"Tool result was {tokens:,} tokens"
+            how_to_fix = "Read narrower line ranges or pipe output through head/tail."
+            message = f"{what}. {how_to_fix}"
             out.append({
                 "rule_id": "FILE_BLOAT",
                 "severity": SEVERITY_WARNING,
-                "session_id": row["session_id"],
-                "message": (
-                    f"Tool result was {row['result_tokens']:,} tokens. "
-                    "Read narrower line ranges or pipe output through head/tail."
-                ),
-                "estimated_savings": max(0, row["result_tokens"] - 20000),
-                "key": _key(f"FILE_BLOAT:{row['target']}", row["session_id"]),
+                "session_id": sid,
+                "message": message,
+                "estimated_savings": max(0, tokens - 20000),
+                "key": _key(f"FILE_BLOAT:{target}", sid),
+                "title": "File bloat",
+                "where": f"`{target}` · session {sid}",
+                "what": what,
+                "how_to_fix": how_to_fix,
+                "occurred_at": _session_started_at(c, sid),
+                "deep_link": f"/sessions/{sid}",
             })
     return out
 
@@ -228,17 +303,26 @@ def large_paste(db_path, since_iso: str) -> List[dict]:
     out: List[dict] = []
     with connect(db_path) as c:
         for row in c.execute(sql, (since_iso,)):
-            tokens = _tokens_from_chars(row["prompt_chars"])
+            sid = row["session_id"]
+            uuid = row["uuid"]
+            chars = row["prompt_chars"]
+            tokens = _tokens_from_chars(chars)
+            what = f"User message was ~{tokens:,} tokens ({chars:,} chars)"
+            how_to_fix = "Prefer @file references over inline pastes — they cache better."
+            message = f"{what}. {how_to_fix}"
             out.append({
                 "rule_id": "LARGE_PASTE",
                 "severity": SEVERITY_INFO,
-                "session_id": row["session_id"],
-                "message": (
-                    f"User message was ~{tokens:,} tokens ({row['prompt_chars']:,} chars). "
-                    "Prefer @file references over inline pastes — they cache better."
-                ),
+                "session_id": sid,
+                "message": message,
                 "estimated_savings": max(0, tokens - 5000),
-                "key": _key(f"LARGE_PASTE:{row['uuid']}", row["session_id"]),
+                "key": _key(f"LARGE_PASTE:{uuid}", sid),
+                "title": "Large paste",
+                "where": f"Session {sid} · message {(uuid or '')[:8]}",
+                "what": what,
+                "how_to_fix": how_to_fix,
+                "occurred_at": _session_started_at(c, sid),
+                "deep_link": f"/sessions/{sid}",
             })
     return out
 
@@ -259,17 +343,25 @@ def output_heavy_session(db_path, since_iso: str) -> List[dict]:
     out: List[dict] = []
     with connect(db_path) as c:
         for row in c.execute(sql, (since_iso,)):
+            sid = row["session_id"]
             ratio = row["out_tok"] / max(1, row["in_tok"])
+            message = (
+                f"Output:input ratio is {ratio:.1f}:1. Unusual — check if the model "
+                "is generating long artifacts that could be files instead."
+            )
             out.append({
                 "rule_id": "OUTPUT_HEAVY_SESSION",
                 "severity": SEVERITY_INFO,
-                "session_id": row["session_id"],
-                "message": (
-                    f"Output:input ratio is {ratio:.1f}:1. Unusual — check if the model "
-                    "is generating long artifacts that could be files instead."
-                ),
+                "session_id": sid,
+                "message": message,
                 "estimated_savings": 0,
-                "key": _key("OUTPUT_HEAVY_SESSION", row["session_id"]),
+                "key": _key("OUTPUT_HEAVY_SESSION", sid),
+                "title": "Output-heavy session",
+                "where": f"Session {sid} · {ratio:.1f}:1 output:input ratio",
+                "what": message,
+                "how_to_fix": TODO_PRESCRIPTION,
+                "occurred_at": _session_started_at(c, sid),
+                "deep_link": f"/sessions/{sid}",
             })
     return out
 
@@ -290,17 +382,25 @@ def expensive_tool(db_path, since_iso: str) -> List[dict]:
     out: List[dict] = []
     with connect(db_path) as c:
         for row in c.execute(sql, (since_iso,)):
+            target = row["target"]
+            n = row["n"]
             avg_t = int(row["avg_t"])
+            what = f"`{target}` averaged {avg_t:,} tokens across {n} calls"
+            how_to_fix = "Consider narrower queries or sub-agent delegation."
+            message = f"{what}. {how_to_fix}"
             out.append({
                 "rule_id": "EXPENSIVE_TOOL",
                 "severity": SEVERITY_WARNING,
                 "session_id": None,
-                "message": (
-                    f"`{row['target']}` averaged {avg_t:,} tokens across {row['n']} calls. "
-                    "Consider narrower queries or sub-agent delegation."
-                ),
-                "estimated_savings": max(0, avg_t - 50000) * row["n"],
-                "key": _key(f"EXPENSIVE_TOOL:{row['target']}", None),
+                "message": message,
+                "estimated_savings": max(0, avg_t - 50000) * n,
+                "key": _key(f"EXPENSIVE_TOOL:{target}", None),
+                "title": "Expensive tool",
+                "where": f"`{target}` · {n} calls",
+                "what": what,
+                "how_to_fix": how_to_fix,
+                "occurred_at": None,
+                "deep_link": None,
             })
     return out
 
@@ -326,16 +426,25 @@ def cache_miss_streak(db_path, since_iso: str) -> List[dict]:
                 streak += 1
                 if streak >= 5 and sid not in flagged:
                     flagged.add(sid)
+                    what = "System prompt may be changing between turns"
+                    how_to_fix = "review skill loads and CLAUDE.md churn"
+                    message = (
+                        f"{streak}+ consecutive cache misses. "
+                        f"{what} — {how_to_fix}."
+                    )
                     out.append({
                         "rule_id": "CACHE_MISS_STREAK",
                         "severity": SEVERITY_WARNING,
                         "session_id": sid,
-                        "message": (
-                            f"{streak}+ consecutive cache misses. System prompt may be "
-                            "changing between turns — review skill loads and CLAUDE.md churn."
-                        ),
+                        "message": message,
                         "estimated_savings": streak * 1000,
                         "key": _key("CACHE_MISS_STREAK", sid),
+                        "title": "Cache miss streak",
+                        "where": f"Session {sid} · {streak}+ consecutive misses",
+                        "what": what,
+                        "how_to_fix": how_to_fix,
+                        "occurred_at": _session_started_at(c, sid),
+                        "deep_link": f"/sessions/{sid}",
                     })
             else:
                 streak = 0
@@ -361,16 +470,25 @@ def vague_prompt(db_path, since_iso: str) -> List[dict]:
     out: List[dict] = []
     with connect(db_path) as c:
         for row in c.execute(sql, (since_iso,)):
+            sid = row["session_id"]
+            n = row["n"]
+            message = (
+                f"{n} very-short user messages (<80 chars). "
+                "Terse prompts often force clarification turns; state the goal upfront."
+            )
             out.append({
                 "rule_id": "VAGUE_PROMPT",
                 "severity": SEVERITY_INFO,
-                "session_id": row["session_id"],
-                "message": (
-                    f"{row['n']} very-short user messages (<80 chars). "
-                    "Terse prompts often force clarification turns; state the goal upfront."
-                ),
+                "session_id": sid,
+                "message": message,
                 "estimated_savings": 0,
-                "key": _key("VAGUE_PROMPT", row["session_id"]),
+                "key": _key("VAGUE_PROMPT", sid),
+                "title": "Vague prompt",
+                "where": f"Session {sid} · {n} short messages",
+                "what": message,
+                "how_to_fix": TODO_PRESCRIPTION,
+                "occurred_at": _session_started_at(c, sid),
+                "deep_link": f"/sessions/{sid}",
             })
     return out
 
@@ -387,24 +505,31 @@ def multi_task_prompt(db_path, since_iso: str) -> List[dict]:
         FROM messages
        WHERE type='user' AND prompt_text IS NOT NULL AND timestamp >= ?
     """
-    counts: dict = {}
+    out: List[dict] = []
     with connect(db_path) as c:
+        counts: dict = {}
         for row in c.execute(sql, (since_iso,)):
             if _MULTITASK_PATTERNS.search(row["prompt_text"] or ""):
                 counts[row["session_id"]] = counts.get(row["session_id"], 0) + 1
-    out: List[dict] = []
-    for sid, n in counts.items():
-        out.append({
-            "rule_id": "MULTI_TASK_PROMPT",
-            "severity": SEVERITY_INFO,
-            "session_id": sid,
-            "message": (
+        for sid, n in counts.items():
+            message = (
                 f"{n} 'and also' pattern(s). Bundled asks compound context; "
                 "finish one thread cleanly, then open a new turn."
-            ),
-            "estimated_savings": 0,
-            "key": _key("MULTI_TASK_PROMPT", sid),
-        })
+            )
+            out.append({
+                "rule_id": "MULTI_TASK_PROMPT",
+                "severity": SEVERITY_INFO,
+                "session_id": sid,
+                "message": message,
+                "estimated_savings": 0,
+                "key": _key("MULTI_TASK_PROMPT", sid),
+                "title": "Multi-task prompt",
+                "where": f"Session {sid} · {n} 'and also' pattern(s)",
+                "what": message,
+                "how_to_fix": TODO_PRESCRIPTION,
+                "occurred_at": _session_started_at(c, sid),
+                "deep_link": f"/sessions/{sid}",
+            })
     return out
 
 
@@ -427,16 +552,25 @@ def no_plan_mode(db_path, since_iso: str) -> List[dict]:
     out: List[dict] = []
     with connect(db_path) as c:
         for row in c.execute(sql, (since_iso,)):
+            sid = row["session_id"]
+            turns = row["turns"]
+            message = (
+                f"Long session ({turns} turns) with no planning step or skill "
+                "invocation. brainstorming / writing-plans skills pay for themselves."
+            )
             out.append({
                 "rule_id": "NO_PLAN_MODE",
                 "severity": SEVERITY_INFO,
-                "session_id": row["session_id"],
-                "message": (
-                    f"Long session ({row['turns']} turns) with no planning step or skill "
-                    "invocation. brainstorming / writing-plans skills pay for themselves."
-                ),
+                "session_id": sid,
+                "message": message,
                 "estimated_savings": 0,
-                "key": _key("NO_PLAN_MODE", row["session_id"]),
+                "key": _key("NO_PLAN_MODE", sid),
+                "title": "No plan mode",
+                "where": f"Session {sid} · {turns} turns, no plan",
+                "what": message,
+                "how_to_fix": TODO_PRESCRIPTION,
+                "occurred_at": _session_started_at(c, sid),
+                "deep_link": f"/sessions/{sid}",
             })
     return out
 
@@ -466,13 +600,20 @@ def all_tips(db_path, since_iso: Optional[str] = None) -> List[dict]:
         try:
             out.extend(rule(db_path, since_iso))
         except Exception as e:
+            message = f"Rule {rule.__name__} crashed: {e}"
             out.append({
                 "rule_id": "_RULE_ERROR",
                 "severity": SEVERITY_INFO,
                 "session_id": None,
-                "message": f"Rule {rule.__name__} crashed: {e}",
+                "message": message,
                 "estimated_savings": 0,
                 "key": _key(f"_RULE_ERROR:{rule.__name__}", None),
+                "title": "Rule error",
+                "where": f"rule {rule.__name__}",
+                "what": message,
+                "how_to_fix": TODO_PRESCRIPTION,
+                "occurred_at": None,
+                "deep_link": None,
             })
     out.sort(key=lambda t: t.get("estimated_savings", 0), reverse=True)
     return out
@@ -484,10 +625,16 @@ def recompute_tips(db_path, since_iso: Optional[str] = None) -> int:
     with connect(db_path) as c:
         c.execute("DELETE FROM tips")
         c.executemany(
-            "INSERT INTO tips (rule_id, severity, session_id, message, estimated_savings, created_at) "
-            "VALUES (?, ?, ?, ?, ?, ?)",
-            [(t["rule_id"], t["severity"], t["session_id"], t["message"],
-              int(t.get("estimated_savings", 0)), now) for t in tips],
+            "INSERT INTO tips (rule_id, severity, session_id, message, estimated_savings, "
+            "created_at, title, where_text, what_text, how_to_fix, occurred_at, deep_link) "
+            "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            [(
+                t["rule_id"], t["severity"], t["session_id"], t["message"],
+                int(t.get("estimated_savings", 0)), now,
+                t.get("title"), t.get("where"), t.get("what"),
+                t.get("how_to_fix"), _iso_to_epoch(t.get("occurred_at")),
+                t.get("deep_link"),
+            ) for t in tips],
         )
         c.commit()
     return len(tips)
