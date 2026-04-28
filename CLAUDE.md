@@ -10,7 +10,7 @@ Forked from the upstream open-source [token-dashboard](https://github.com/natehe
 
 ## Status
 
-Working codebase. 71 Python unit tests (`python3 -m unittest discover tests`). Seven UI tabs wired up (Overview, Prompts, Sessions, Projects, Skills, Tips, Settings) + a new Session Discipline tab planned. New modules stubbed pending Specs 2–6: `tips_engine.py`, `health_score.py`, `ai_analyzer.py`, `discipline.py`.
+Working codebase. 111 Python unit tests (`python3 -m unittest discover tests`). Seven UI tabs wired up (Overview, Prompts, Sessions, Projects, Skills, Tips, Settings) + a new Session Discipline tab planned. New modules stubbed pending Specs 2–6: `tips_engine.py`, `health_score.py`, `ai_analyzer.py`, `discipline.py`.
 
 ## Architecture
 

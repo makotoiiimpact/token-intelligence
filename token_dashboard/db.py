@@ -91,7 +91,13 @@ CREATE TABLE IF NOT EXISTS tips (
   session_id          TEXT,
   message             TEXT    NOT NULL,
   estimated_savings   INTEGER NOT NULL DEFAULT 0,
-  created_at          REAL    NOT NULL
+  created_at          REAL    NOT NULL,
+  title               TEXT,
+  where_text          TEXT,
+  what_text           TEXT,
+  how_to_fix          TEXT,
+  occurred_at         REAL,
+  deep_link           TEXT
 );
 CREATE INDEX IF NOT EXISTS idx_tips_rule     ON tips(rule_id);
 CREATE INDEX IF NOT EXISTS idx_tips_severity ON tips(severity);
@@ -120,6 +126,34 @@ def init_db(path: Union[str, Path]) -> None:
     with sqlite3.connect(path) as c:
         _migrate_add_message_id(c)
         c.executescript(SCHEMA)
+        _migrate_add_recos_columns(c)
+
+
+def _migrate_add_recos_columns(conn) -> None:
+    """Add structured-output columns to `tips` for AI Recos Phase 1.
+
+    Why: Phase 1 emits per-tip `title`, `where_text`, `what_text`, `how_to_fix`,
+    `occurred_at`, `deep_link` alongside the existing prose `message`. New columns
+    are nullable; `recompute_tips()` truncates and rewrites so no backfill is needed.
+    """
+    has_table = conn.execute(
+        "SELECT 1 FROM sqlite_master WHERE type='table' AND name='tips'"
+    ).fetchone()
+    if not has_table:
+        return
+    cols = {row[1] for row in conn.execute("PRAGMA table_info(tips)")}
+    additions = (
+        ("title", "TEXT"),
+        ("where_text", "TEXT"),
+        ("what_text", "TEXT"),
+        ("how_to_fix", "TEXT"),
+        ("occurred_at", "REAL"),
+        ("deep_link", "TEXT"),
+    )
+    for name, sql_type in additions:
+        if name not in cols:
+            conn.execute(f"ALTER TABLE tips ADD COLUMN {name} {sql_type}")
+    conn.commit()
 
 
 def _migrate_add_message_id(conn) -> None:
