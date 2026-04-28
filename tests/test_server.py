@@ -7,6 +7,7 @@ import tempfile
 import threading
 import unittest
 import urllib.request
+from unittest.mock import patch
 
 from token_dashboard.db import init_db
 from token_dashboard.server import build_handler
@@ -79,6 +80,63 @@ class ServerTests(unittest.TestCase):
         body = json.loads(self._get("/api/ai/status"))
         self.assertIn("configured", body)
         self.assertIsInstance(body["configured"], bool)
+
+
+class NoScanFlagTests(unittest.TestCase):
+    """`run(no_scan=True)` must skip starting the background `_scan_loop`
+    thread. Regression: previously the loop ran unconditionally, causing a
+    second scanner to compete with the daemon dashboard against the same
+    `~/.claude/token-dashboard.db` whenever a verify-only server was launched
+    alongside it (discovered during AI Recos Phase 1 verification)."""
+
+    def setUp(self):
+        self.tmp = tempfile.mkdtemp()
+        self.db = os.path.join(self.tmp, "t.db")
+        init_db(self.db)
+
+    def _run_with_stubbed_server(self, no_scan: bool):
+        """Invoke `run(...)` but capture which threads it tried to start.
+
+        We patch `ThreadingHTTPServer.serve_forever` to return immediately so
+        `run` doesn't block, and patch `threading.Thread` to record calls
+        targeting `_scan_loop` without actually starting that loop.
+        """
+        from token_dashboard import server as server_module
+
+        scan_thread_started: list = []
+        real_thread_cls = threading.Thread
+
+        def fake_thread(*args, **kwargs):
+            target = kwargs.get("target") or (args[0] if args else None)
+            if target is server_module._scan_loop:
+                scan_thread_started.append(target)
+                return real_thread_cls(target=lambda: None, daemon=True)
+            return real_thread_cls(*args, **kwargs)
+
+        with patch.object(server_module.threading, "Thread", side_effect=fake_thread), \
+             patch.object(server_module.http.server, "ThreadingHTTPServer") as MockHTTPD:
+            MockHTTPD.return_value.serve_forever.return_value = None
+            server_module.run(
+                "127.0.0.1", _free_port(), self.db, "/nonexistent",
+                no_scan=no_scan,
+            )
+        return scan_thread_started
+
+    def test_no_scan_flag_prevents_background_scan_thread(self):
+        started = self._run_with_stubbed_server(no_scan=True)
+        self.assertEqual(
+            started, [],
+            "`run(no_scan=True)` started the _scan_loop background thread; "
+            "should have skipped it.",
+        )
+
+    def test_scan_runs_when_no_scan_is_false(self):
+        started = self._run_with_stubbed_server(no_scan=False)
+        self.assertEqual(
+            len(started), 1,
+            "`run(no_scan=False)` did not start the _scan_loop background thread; "
+            "default behavior regressed.",
+        )
 
 
 if __name__ == "__main__":

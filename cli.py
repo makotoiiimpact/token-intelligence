@@ -92,7 +92,7 @@ def cmd_dashboard(args):
     if not args.no_open:
         webbrowser.open(url)
     print(f"Token Dashboard listening on {url}")
-    run(host, port, db, _projects(args))
+    run(host, port, db, _projects(args), no_scan=args.no_scan)
 
 
 def main():
@@ -107,7 +107,11 @@ def main():
     sub.add_parser("stats", parents=[common]).set_defaults(func=cmd_stats)
     sub.add_parser("tips",  parents=[common]).set_defaults(func=cmd_tips)
     d = sub.add_parser("dashboard", parents=[common])
-    d.add_argument("--no-scan", action="store_true")
+    d.add_argument(
+        "--no-scan", action="store_true",
+        help="skip the startup scan AND the background re-scan loop "
+             "(useful when running a verify-only server alongside the main daemon)",
+    )
     d.add_argument("--no-open", action="store_true")
     d.set_defaults(func=cmd_dashboard)
     args = p.parse_args()

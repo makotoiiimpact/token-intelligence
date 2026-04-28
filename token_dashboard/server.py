@@ -260,8 +260,9 @@ def _scan_loop(db_path: str, projects_dir: str, interval: float = 30.0):
         time.sleep(interval)
 
 
-def run(host: str, port: int, db_path: str, projects_dir: str):
-    threading.Thread(target=_scan_loop, args=(db_path, projects_dir), daemon=True).start()
+def run(host: str, port: int, db_path: str, projects_dir: str, *, no_scan: bool = False):
+    if not no_scan:
+        threading.Thread(target=_scan_loop, args=(db_path, projects_dir), daemon=True).start()
     H = build_handler(db_path, projects_dir)
     httpd = http.server.ThreadingHTTPServer((host, port), H)
     httpd.serve_forever()
