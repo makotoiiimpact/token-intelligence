@@ -87,8 +87,16 @@ class MarathonStructuredFields(unittest.TestCase):
             self.assertIn(k, tip, f"missing field: {k}")
         self.assertEqual(tip["rule_id"], "MARATHON_SESSION")
         self.assertEqual(tip["title"], "Marathon session")
-        self.assertEqual(tip["how_to_fix"], "Handoff earlier")
-        self.assertEqual(tip["what"], "past 120K, retrieval accuracy drops measurably")
+        self.assertEqual(
+            tip["how_to_fix"],
+            "Initiate a structured handoff at the 90K–120K (🟠) threshold. "
+            "Externalize state to Notion or a plan doc, then start a fresh session.",
+        )
+        self.assertEqual(
+            tip["what"],
+            "Session ran past the 120K context window where "
+            "retrieval accuracy degrades measurably.",
+        )
         self.assertEqual(tip["deep_link"], "/sessions/abc123")
 
     def test_where_summarizes_session(self):
@@ -96,15 +104,11 @@ class MarathonStructuredFields(unittest.TestCase):
         self.assertIn("abc123", tip["where"])
         self.assertIn("35", tip["where"])
 
-    def test_message_byte_identical_to_pre_migration(self):
-        # The pre-Phase-1 message format must be reproduced verbatim, since the
-        # frontend still reads tip.message in Phase 1.
+    def test_message_is_what_plus_how_to_fix(self):
+        # Phase 1.5: message is uniformly derived as `what + " " + how_to_fix`
+        # across every rule. Lock that contract for the marathon row specifically.
         [tip] = marathon_session(self.db, SINCE)
-        self.assertEqual(
-            tip["message"],
-            "Session hit 35 turns / 0 tokens. "
-            "Handoff earlier — past 120K, retrieval accuracy drops measurably.",
-        )
+        self.assertEqual(tip["message"], f"{tip['what']} {tip['how_to_fix']}")
 
     def test_occurred_at_is_session_min_timestamp(self):
         [tip] = marathon_session(self.db, SINCE)
@@ -140,8 +144,9 @@ class ExpensiveToolGlobalRule(unittest.TestCase):
         self.assertIn("Glob(**)", tip["where"])
 
 
-class EditorialRulesUseTodoPlaceholder(unittest.TestCase):
-    """Editorial rules: how_to_fix is the TODO placeholder until copy lands."""
+class EditorialRulesUseApprovedPrescription(unittest.TestCase):
+    """Editorial rules: how_to_fix carries the Phase 1.5 approved prescription
+    (no TODO placeholder anywhere)."""
 
     def setUp(self):
         self.tmp = tempfile.mkdtemp()
@@ -198,40 +203,57 @@ class EditorialRulesUseTodoPlaceholder(unittest.TestCase):
             )
             c.commit()
 
-    def test_task_drift_uses_todo(self):
+    def test_task_drift_prescription(self):
         self._seed_task_drift()
         [tip] = task_drift(self.db, SINCE)
         self.assertEqual(tip["rule_id"], "TASK_DRIFT")
-        self.assertEqual(tip["how_to_fix"], TODO_PRESCRIPTION)
-        # editorial: what holds the full diagnosis prose
-        self.assertEqual(tip["what"], tip["message"])
+        self.assertEqual(
+            tip["how_to_fix"],
+            "One session per job. Externalize what's done so far, "
+            "close this session, and open a fresh one for the next task.",
+        )
 
-    def test_vague_prompt_uses_todo(self):
+    def test_vague_prompt_prescription(self):
         self._seed_vague_prompt()
         [tip] = vague_prompt(self.db, SINCE)
-        self.assertEqual(tip["how_to_fix"], TODO_PRESCRIPTION)
+        self.assertEqual(
+            tip["how_to_fix"],
+            "State the goal, the constraint, and the deliverable in the first message. "
+            "\"Fix the bug\" → \"Fix the timezone bug in parse_session.py "
+            "so test_dst_boundary passes.\"",
+        )
 
-    def test_multi_task_prompt_uses_todo(self):
+    def test_multi_task_prompt_prescription(self):
         self._seed_multi_task()
         [tip] = multi_task_prompt(self.db, SINCE)
-        self.assertEqual(tip["how_to_fix"], TODO_PRESCRIPTION)
+        self.assertEqual(
+            tip["how_to_fix"],
+            "Finish the current task, ship it, then open a new turn for the next ask. "
+            "Resist task creep mid-mission.",
+        )
 
-    def test_no_plan_mode_uses_todo(self):
+    def test_no_plan_mode_prescription(self):
         self._seed_no_plan()
         [tip] = no_plan_mode(self.db, SINCE)
-        self.assertEqual(tip["how_to_fix"], TODO_PRESCRIPTION)
+        self.assertEqual(
+            tip["how_to_fix"],
+            "Start with a plan. Invoke a planning skill (brainstorming, writing-plans) "
+            "before code work — it pays for itself in fewer correction cycles.",
+        )
 
-    def test_output_heavy_uses_todo(self):
+    def test_output_heavy_prescription(self):
         self._seed_output_heavy()
         [tip] = output_heavy_session(self.db, SINCE)
-        self.assertEqual(tip["how_to_fix"], TODO_PRESCRIPTION)
+        self.assertEqual(
+            tip["how_to_fix"],
+            "Route long artifacts to files instead of inline text. "
+            "File output doesn't reload into the next turn's context.",
+        )
 
 
-class MechanicalSplitMessagesByteIdentical(unittest.TestCase):
-    """For the 7 mechanical-split rules, message must remain byte-identical.
-
-    `message` is composed from {what, how_to_fix} (or includes them) at emit
-    time; the composition must reproduce the pre-Phase-1 string exactly.
+class MechanicalRulesNewCopyMessages(unittest.TestCase):
+    """Locks the Phase 1.5 approved copy for each mechanical rule via the
+    derived `message` field (which is `f"{what} {how_to_fix}"` uniformly).
     """
 
     def setUp(self):
@@ -255,9 +277,11 @@ class MechanicalSplitMessagesByteIdentical(unittest.TestCase):
         [tip] = correction_loops(self.db, SINCE)
         self.assertEqual(
             tip["message"],
-            "3 correction message(s) detected. "
-            "Rewinding with /re before retrying keeps context clean; "
-            "failed attempts otherwise linger.",
+            "Phrases like \"try again\" and \"that's wrong\" surfaced 3 times. "
+            "Repeated correction usually means the spec is wrong, not the output. "
+            "Stop and rewind to the last good prompt. "
+            "Restate the goal in one sentence, then retry. "
+            "Don't iterate forward through corrections.",
         )
 
     def test_redundant_reads_message(self):
@@ -277,8 +301,9 @@ class MechanicalSplitMessagesByteIdentical(unittest.TestCase):
         [tip] = redundant_reads(self.db, SINCE)
         self.assertEqual(
             tip["message"],
-            "`src/foo.ts` was Read 5x in one session. "
-            "Summarize in CLAUDE.md or read once per session.",
+            "File was read 5× in a single session. "
+            "Summarize the file in CLAUDE.md once and reference the cached "
+            "summary instead of re-reading on every turn.",
         )
 
     def test_file_bloat_message(self):
@@ -296,8 +321,9 @@ class MechanicalSplitMessagesByteIdentical(unittest.TestCase):
         [tip] = file_bloat(self.db, SINCE)
         self.assertEqual(
             tip["message"],
-            "Tool result was 50,000 tokens. "
-            "Read narrower line ranges or pipe output through head/tail.",
+            "Tool result returned 50,000 tokens — past the 20K bloat threshold. "
+            "Read the file in slices (specific line ranges) or grep for the "
+            "section needed. Avoid loading whole large files into context.",
         )
 
     def test_cache_miss_streak_message(self):
@@ -312,9 +338,11 @@ class MechanicalSplitMessagesByteIdentical(unittest.TestCase):
         [tip] = cache_miss_streak(self.db, SINCE)
         self.assertEqual(
             tip["message"],
-            "5+ consecutive cache misses. "
-            "System prompt may be changing between turns "
-            "— review skill loads and CLAUDE.md churn.",
+            "5 consecutive assistant turns with zero cache reads. "
+            "The prompt cache is being invalidated. "
+            "Avoid editing earlier messages or system prompts mid-session. "
+            "Cache invalidation forces full re-tokenization on every turn "
+            "and erases the discount.",
         )
 
 
@@ -333,8 +361,14 @@ class AllRulesEmitNewFields(unittest.TestCase):
                 self.assertIn(k, tip, f"{tip['rule_id']} missing {k}")
             self.assertIsInstance(tip["title"], str)
             self.assertIsInstance(tip["how_to_fix"], str)
-            if tip["rule_id"] in EDITORIAL_RULES:
-                self.assertEqual(tip["how_to_fix"], TODO_PRESCRIPTION)
+            # Phase 1.5: no rule emits the TODO placeholder anymore.
+            # `_RULE_ERROR` is internal and only fires when a detector throws,
+            # which doesn't happen in this fixture.
+            if tip["rule_id"] != "_RULE_ERROR":
+                self.assertNotEqual(
+                    tip["how_to_fix"], TODO_PRESCRIPTION,
+                    f"{tip['rule_id']} still emits the TODO placeholder",
+                )
 
 
 class RecomputePersistsNewColumns(unittest.TestCase):
@@ -354,7 +388,11 @@ class RecomputePersistsNewColumns(unittest.TestCase):
                 "WHERE rule_id = 'MARATHON_SESSION'"
             ).fetchone()
         self.assertEqual(row["title"], "Marathon session")
-        self.assertEqual(row["how_to_fix"], "Handoff earlier")
+        self.assertEqual(
+            row["how_to_fix"],
+            "Initiate a structured handoff at the 90K–120K (🟠) threshold. "
+            "Externalize state to Notion or a plan doc, then start a fresh session.",
+        )
         self.assertIn("Session abc123", row["where_text"])
         self.assertEqual(row["deep_link"], "/sessions/abc123")
         self.assertIsInstance(row["occurred_at"], float)
@@ -438,7 +476,11 @@ class TipsApiSerializesStructuredFields(unittest.TestCase):
 
         # structured payload
         self.assertEqual(marathon["title"], "Marathon session")
-        self.assertEqual(marathon["how_to_fix"], "Handoff earlier")
+        self.assertEqual(
+            marathon["how_to_fix"],
+            "Initiate a structured handoff at the 90K–120K (🟠) threshold. "
+            "Externalize state to Notion or a plan doc, then start a fresh session.",
+        )
         self.assertEqual(marathon["deep_link"], "/sessions/abc123")
         self.assertIsInstance(marathon["occurred_at"], str)
         self.assertTrue(marathon["occurred_at"].startswith("2026-04-18"))
