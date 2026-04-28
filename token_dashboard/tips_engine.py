@@ -98,12 +98,15 @@ def marathon_session(db_path, since_iso: str) -> List[dict]:
             tokens = row["tokens"] or 0
             overage = max(0, tokens - 120000)
             severity = SEVERITY_CRITICAL if tokens > 250000 else SEVERITY_WARNING
-            what = "past 120K, retrieval accuracy drops measurably"
-            how_to_fix = "Handoff earlier"
-            message = (
-                f"Session hit {turns} turns / {tokens:,} tokens. "
-                f"{how_to_fix} — {what}."
+            what = (
+                "Session ran past the 120K context window where "
+                "retrieval accuracy degrades measurably."
             )
+            how_to_fix = (
+                "Initiate a structured handoff at the 90K–120K (🟠) threshold. "
+                "Externalize state to Notion or a plan doc, then start a fresh session."
+            )
+            message = f"{what} {how_to_fix}"
             out.append({
                 "rule_id": "MARATHON_SESSION",
                 "severity": severity,
@@ -141,12 +144,16 @@ def correction_loops(db_path, since_iso: str) -> List[dict]:
                 counts[row["session_id"]] = counts.get(row["session_id"], 0) + 1
         for sid, n in counts.items():
             severity = SEVERITY_WARNING if n >= 3 else SEVERITY_INFO
-            what = "failed attempts otherwise linger"
-            how_to_fix = "Rewinding with /re before retrying keeps context clean"
-            message = (
-                f"{n} correction message(s) detected. "
-                f"{how_to_fix}; {what}."
+            what = (
+                f"Phrases like \"try again\" and \"that's wrong\" surfaced {n} times. "
+                "Repeated correction usually means the spec is wrong, not the output."
             )
+            how_to_fix = (
+                "Stop and rewind to the last good prompt. "
+                "Restate the goal in one sentence, then retry. "
+                "Don't iterate forward through corrections."
+            )
+            message = f"{what} {how_to_fix}"
             out.append({
                 "rule_id": "CORRECTION_LOOPS",
                 "severity": severity,
@@ -195,10 +202,15 @@ def task_drift(db_path, since_iso: str) -> List[dict]:
         for sid, s in vocab.items():
             if len(s) < 40:
                 continue
-            message = (
-                f"{len(s)} distinct topic tokens in this session — possible task drift. "
-                "One session per job keeps the model focused."
+            what = (
+                f"{len(s)} distinct topic tokens in this session "
+                "suggest it's covering multiple jobs at once."
             )
+            how_to_fix = (
+                "One session per job. Externalize what's done so far, "
+                "close this session, and open a fresh one for the next task."
+            )
+            message = f"{what} {how_to_fix}"
             out.append({
                 "rule_id": "TASK_DRIFT",
                 "severity": SEVERITY_INFO,
@@ -208,8 +220,8 @@ def task_drift(db_path, since_iso: str) -> List[dict]:
                 "key": _key("TASK_DRIFT", sid),
                 "title": "Task drift",
                 "where": f"Session {sid} · {len(s)} distinct topic tokens",
-                "what": message,
-                "how_to_fix": TODO_PRESCRIPTION,
+                "what": what,
+                "how_to_fix": how_to_fix,
                 "occurred_at": _session_started_at(c, sid),
                 "deep_link": f"/sessions/{sid}",
             })
@@ -233,9 +245,12 @@ def redundant_reads(db_path, since_iso: str) -> List[dict]:
             sid = row["session_id"]
             target = row["target"]
             n = row["n"]
-            what = f"`{target}` was Read {n}x in one session"
-            how_to_fix = "Summarize in CLAUDE.md or read once per session."
-            message = f"{what}. {how_to_fix}"
+            what = f"File was read {n}× in a single session."
+            how_to_fix = (
+                "Summarize the file in CLAUDE.md once and reference the cached "
+                "summary instead of re-reading on every turn."
+            )
+            message = f"{what} {how_to_fix}"
             out.append({
                 "rule_id": "REDUNDANT_READS",
                 "severity": SEVERITY_WARNING,
@@ -270,9 +285,12 @@ def file_bloat(db_path, since_iso: str) -> List[dict]:
                 continue
             seen.add(k)
             tokens = row["result_tokens"]
-            what = f"Tool result was {tokens:,} tokens"
-            how_to_fix = "Read narrower line ranges or pipe output through head/tail."
-            message = f"{what}. {how_to_fix}"
+            what = f"Tool result returned {tokens:,} tokens — past the 20K bloat threshold."
+            how_to_fix = (
+                "Read the file in slices (specific line ranges) or grep for the "
+                "section needed. Avoid loading whole large files into context."
+            )
+            message = f"{what} {how_to_fix}"
             out.append({
                 "rule_id": "FILE_BLOAT",
                 "severity": SEVERITY_WARNING,
@@ -307,9 +325,13 @@ def large_paste(db_path, since_iso: str) -> List[dict]:
             uuid = row["uuid"]
             chars = row["prompt_chars"]
             tokens = _tokens_from_chars(chars)
-            what = f"User message was ~{tokens:,} tokens ({chars:,} chars)"
-            how_to_fix = "Prefer @file references over inline pastes — they cache better."
-            message = f"{what}. {how_to_fix}"
+            what = f"Pasted prompt was ~{tokens:,} tokens, well past the 5K threshold."
+            how_to_fix = (
+                "Convert pasted content first: HTML→markdown (~90% reduction), "
+                "PDF→text (~65–70%), DOCX→markdown (~33%). "
+                "Or upload as a file instead of pasting inline."
+            )
+            message = f"{what} {how_to_fix}"
             out.append({
                 "rule_id": "LARGE_PASTE",
                 "severity": SEVERITY_INFO,
@@ -345,10 +367,15 @@ def output_heavy_session(db_path, since_iso: str) -> List[dict]:
         for row in c.execute(sql, (since_iso,)):
             sid = row["session_id"]
             ratio = row["out_tok"] / max(1, row["in_tok"])
-            message = (
-                f"Output:input ratio is {ratio:.1f}:1. Unusual — check if the model "
-                "is generating long artifacts that could be files instead."
+            what = (
+                f"Output dominates the session at a {ratio:.1f}:1 ratio. "
+                "The model is generating more than it's consuming."
             )
+            how_to_fix = (
+                "Route long artifacts to files instead of inline text. "
+                "File output doesn't reload into the next turn's context."
+            )
+            message = f"{what} {how_to_fix}"
             out.append({
                 "rule_id": "OUTPUT_HEAVY_SESSION",
                 "severity": SEVERITY_INFO,
@@ -358,8 +385,8 @@ def output_heavy_session(db_path, since_iso: str) -> List[dict]:
                 "key": _key("OUTPUT_HEAVY_SESSION", sid),
                 "title": "Output-heavy session",
                 "where": f"Session {sid} · {ratio:.1f}:1 output:input ratio",
-                "what": message,
-                "how_to_fix": TODO_PRESCRIPTION,
+                "what": what,
+                "how_to_fix": how_to_fix,
                 "occurred_at": _session_started_at(c, sid),
                 "deep_link": f"/sessions/{sid}",
             })
@@ -385,9 +412,13 @@ def expensive_tool(db_path, since_iso: str) -> List[dict]:
             target = row["target"]
             n = row["n"]
             avg_t = int(row["avg_t"])
-            what = f"`{target}` averaged {avg_t:,} tokens across {n} calls"
-            how_to_fix = "Consider narrower queries or sub-agent delegation."
-            message = f"{what}. {how_to_fix}"
+            # `target` and `n` already live in `where`; keep `what` to the diagnosis only.
+            what = f"Each call averaged {avg_t:,} tokens."
+            how_to_fix = (
+                "Narrow the tool's input scope (specific path, line range, query). "
+                "If breadth is required, run once and cache the result rather than re-invoking."
+            )
+            message = f"{what} {how_to_fix}"
             out.append({
                 "rule_id": "EXPENSIVE_TOOL",
                 "severity": SEVERITY_WARNING,
@@ -426,12 +457,16 @@ def cache_miss_streak(db_path, since_iso: str) -> List[dict]:
                 streak += 1
                 if streak >= 5 and sid not in flagged:
                     flagged.add(sid)
-                    what = "System prompt may be changing between turns"
-                    how_to_fix = "review skill loads and CLAUDE.md churn"
-                    message = (
-                        f"{streak}+ consecutive cache misses. "
-                        f"{what} — {how_to_fix}."
+                    what = (
+                        f"{streak} consecutive assistant turns with zero cache reads. "
+                        "The prompt cache is being invalidated."
                     )
+                    how_to_fix = (
+                        "Avoid editing earlier messages or system prompts mid-session. "
+                        "Cache invalidation forces full re-tokenization on every turn "
+                        "and erases the discount."
+                    )
+                    message = f"{what} {how_to_fix}"
                     out.append({
                         "rule_id": "CACHE_MISS_STREAK",
                         "severity": SEVERITY_WARNING,
@@ -472,10 +507,16 @@ def vague_prompt(db_path, since_iso: str) -> List[dict]:
         for row in c.execute(sql, (since_iso,)):
             sid = row["session_id"]
             n = row["n"]
-            message = (
-                f"{n} very-short user messages (<80 chars). "
-                "Terse prompts often force clarification turns; state the goal upfront."
+            what = (
+                f"{n} user messages under 80 characters. "
+                "Terse prompts force clarification turns that burn context."
             )
+            how_to_fix = (
+                "State the goal, the constraint, and the deliverable in the first message. "
+                "\"Fix the bug\" → \"Fix the timezone bug in parse_session.py "
+                "so test_dst_boundary passes.\""
+            )
+            message = f"{what} {how_to_fix}"
             out.append({
                 "rule_id": "VAGUE_PROMPT",
                 "severity": SEVERITY_INFO,
@@ -485,8 +526,8 @@ def vague_prompt(db_path, since_iso: str) -> List[dict]:
                 "key": _key("VAGUE_PROMPT", sid),
                 "title": "Vague prompt",
                 "where": f"Session {sid} · {n} short messages",
-                "what": message,
-                "how_to_fix": TODO_PRESCRIPTION,
+                "what": what,
+                "how_to_fix": how_to_fix,
                 "occurred_at": _session_started_at(c, sid),
                 "deep_link": f"/sessions/{sid}",
             })
@@ -512,10 +553,15 @@ def multi_task_prompt(db_path, since_iso: str) -> List[dict]:
             if _MULTITASK_PATTERNS.search(row["prompt_text"] or ""):
                 counts[row["session_id"]] = counts.get(row["session_id"], 0) + 1
         for sid, n in counts.items():
-            message = (
-                f"{n} 'and also' pattern(s). Bundled asks compound context; "
-                "finish one thread cleanly, then open a new turn."
+            what = (
+                f"\"And also\" / \"while you're at it\" appeared {n} time(s). "
+                "Bundled asks dilute focus and compound context."
             )
+            how_to_fix = (
+                "Finish the current task, ship it, then open a new turn for the next ask. "
+                "Resist task creep mid-mission."
+            )
+            message = f"{what} {how_to_fix}"
             out.append({
                 "rule_id": "MULTI_TASK_PROMPT",
                 "severity": SEVERITY_INFO,
@@ -525,8 +571,8 @@ def multi_task_prompt(db_path, since_iso: str) -> List[dict]:
                 "key": _key("MULTI_TASK_PROMPT", sid),
                 "title": "Multi-task prompt",
                 "where": f"Session {sid} · {n} 'and also' pattern(s)",
-                "what": message,
-                "how_to_fix": TODO_PRESCRIPTION,
+                "what": what,
+                "how_to_fix": how_to_fix,
                 "occurred_at": _session_started_at(c, sid),
                 "deep_link": f"/sessions/{sid}",
             })
@@ -554,10 +600,15 @@ def no_plan_mode(db_path, since_iso: str) -> List[dict]:
         for row in c.execute(sql, (since_iso,)):
             sid = row["session_id"]
             turns = row["turns"]
-            message = (
-                f"Long session ({turns} turns) with no planning step or skill "
-                "invocation. brainstorming / writing-plans skills pay for themselves."
+            what = (
+                f"Session ran {turns} turns with no planning step "
+                "and no skill invocation."
             )
+            how_to_fix = (
+                "Start with a plan. Invoke a planning skill (brainstorming, writing-plans) "
+                "before code work — it pays for itself in fewer correction cycles."
+            )
+            message = f"{what} {how_to_fix}"
             out.append({
                 "rule_id": "NO_PLAN_MODE",
                 "severity": SEVERITY_INFO,
@@ -567,8 +618,8 @@ def no_plan_mode(db_path, since_iso: str) -> List[dict]:
                 "key": _key("NO_PLAN_MODE", sid),
                 "title": "No plan mode",
                 "where": f"Session {sid} · {turns} turns, no plan",
-                "what": message,
-                "how_to_fix": TODO_PRESCRIPTION,
+                "what": what,
+                "how_to_fix": how_to_fix,
                 "occurred_at": _session_started_at(c, sid),
                 "deep_link": f"/sessions/{sid}",
             })
