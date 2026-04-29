@@ -43,12 +43,17 @@ function severityLabel(severity) {
   return severity.charAt(0).toUpperCase() + severity.slice(1);
 }
 
-const defaultExpanded = (sev) => sev === 'critical';
+// Compact mode (Quick Wins on Overview) is always default-collapsed —
+// severity-based default-expand only applies on the dedicated AI Recos tab.
+// Critical Marathon recos that auto-expand on the tab were making Quick Wins
+// taller than the Daily Token Burn chart next to it.
+const defaultExpanded = (sev, { compact = false } = {}) =>
+  !compact && sev === 'critical';
 
-function isExpanded(t, sev) {
+function isExpanded(t, sev, opts) {
   const key = t && t.key;
   if (key && expandState.has(key)) return expandState.get(key);
-  return defaultExpanded(sev);
+  return defaultExpanded(sev, opts);
 }
 
 function row(label, value) {
@@ -63,12 +68,20 @@ export function renderReco(t, opts = {}) {
   const { compact: isCompact = false } = opts;
   const sev = severityOf(t);
   const title = (t && t.title) || titleFromRule(t && t.rule_id);
-  const expanded = isExpanded(t, sev);
+  const expanded = isExpanded(t, sev, { compact: isCompact });
 
-  const dateStr = t && t.occurred_at ? fmt.tsLong(t.occurred_at) : '';
-  const meta = dateStr
-    ? `${severityLabel(sev)} · ${fmt.htmlSafe(dateStr)}`
-    : severityLabel(sev);
+  // Compact mode (Quick Wins) shows `where` as the subtitle — more
+  // actionable at a glance than the severity+date pair. Non-compact mode
+  // keeps "{Severity} · {date}".
+  let meta;
+  if (isCompact && t && t.where) {
+    meta = fmt.htmlSafe(t.where);
+  } else {
+    const dateStr = t && t.occurred_at ? fmt.tsLong(t.occurred_at) : '';
+    meta = dateStr
+      ? `${severityLabel(sev)} · ${fmt.htmlSafe(dateStr)}`
+      : severityLabel(sev);
+  }
 
   const saves = t && t.estimated_savings
     ? `<span class="reco__saves">~${fmt.htmlSafe(compact(t.estimated_savings))} saved</span>`
