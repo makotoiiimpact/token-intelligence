@@ -21,6 +21,20 @@ export const fmt = {
   },
   modelShort: m => (m || '').replace('claude-', ''),
   ts: t => (t || '').slice(0, 16).replace('T', ' '),
+  // User-local "Apr 26, 2026 · 14:32" from an ISO string. Parsed with Date,
+  // formatted via Intl.DateTimeFormat. Returns '' for null/empty/invalid.
+  tsLong: iso => {
+    if (!iso) return '';
+    const d = new Date(iso);
+    if (isNaN(d.getTime())) return '';
+    const date = new Intl.DateTimeFormat('en-US', {
+      year: 'numeric', month: 'short', day: 'numeric',
+    }).format(d);
+    const time = new Intl.DateTimeFormat('en-US', {
+      hour: '2-digit', minute: '2-digit', hour12: false,
+    }).format(d);
+    return `${date} · ${time}`;
+  },
 };
 
 export async function api(path, opts) {
