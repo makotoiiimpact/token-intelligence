@@ -10,6 +10,7 @@ import { fmt } from '/web/app.js';
 
 const expandState = new Map();
 const ATTACHED = new WeakSet();
+const ATTACHED_DISMISS = new WeakSet();
 
 export function severityOf(t) {
   const s = String((t && t.severity) || '').toLowerCase();
@@ -92,6 +93,16 @@ export function renderReco(t, opts = {}) {
   const expandedCls = expanded ? ' reco--expanded' : '';
   const dataKey = t && t.key ? ` data-key="${fmt.htmlSafe(t.key)}"` : '';
 
+  // Dismiss / Undismiss button — DOM-sibling of the header (not nested
+  // inside the header <button>; nested buttons are invalid HTML). Absolute
+  // positioning in CSS places it visually inside the header row.
+  const isDismissed = !!(t && t.dismissed);
+  const dismissBtn = t && t.key
+    ? (isDismissed
+        ? `<button class="reco__undismiss" type="button" aria-label="Undismiss" data-key="${fmt.htmlSafe(t.key)}">Undismiss</button>`
+        : `<button class="reco__dismiss" type="button" aria-label="Dismiss" data-key="${fmt.htmlSafe(t.key)}">×</button>`)
+    : '';
+
   return `<article class="reco reco--${sev}${compactCls}${expandedCls}"${dataKey}>
     <button class="reco__header" type="button" aria-expanded="${expanded}">
       <div class="reco__icon">${iconFor(sev)}</div>
@@ -101,6 +112,7 @@ export function renderReco(t, opts = {}) {
       </div>
       ${saves}
     </button>
+    ${dismissBtn}
     <div class="reco__body">
       ${bodyRows}
       ${footer}
@@ -124,5 +136,33 @@ export function attachExpandHandlers(root) {
     if (key) expandState.set(key, newState);
     header.setAttribute('aria-expanded', String(newState));
     article.classList.toggle('reco--expanded', newState);
+  });
+}
+
+// Wire dismiss/undismiss click delegation on the same list container.
+// Caller supplies onDismiss(key, articleEl) and onUndismiss(key, articleEl)
+// for the optimistic-UI side: handler removes the article from DOM and
+// fires the network call. Idempotent — second attach on the same root is
+// a no-op.
+export function attachDismissHandlers(root, callbacks = {}) {
+  if (!root || ATTACHED_DISMISS.has(root)) return;
+  ATTACHED_DISMISS.add(root);
+  const { onDismiss, onUndismiss } = callbacks;
+  root.addEventListener('click', (e) => {
+    const dismiss = e.target.closest('.reco__dismiss');
+    if (dismiss && root.contains(dismiss)) {
+      e.stopPropagation();
+      const key = dismiss.dataset.key;
+      const article = dismiss.closest('.reco');
+      if (key && article && onDismiss) onDismiss(key, article);
+      return;
+    }
+    const undismiss = e.target.closest('.reco__undismiss');
+    if (undismiss && root.contains(undismiss)) {
+      e.stopPropagation();
+      const key = undismiss.dataset.key;
+      const article = undismiss.closest('.reco');
+      if (key && article && onUndismiss) onUndismiss(key, article);
+    }
   });
 }
