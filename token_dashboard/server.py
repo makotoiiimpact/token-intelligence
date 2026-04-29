@@ -148,17 +148,32 @@ def build_handler(db_path: str, projects_dir: str):
                     return _send_error(self, 404, "no cached analysis for this session")
                 return _send_json(self, cached)
             if path == "/api/tips":
+                include_dismissed = qs.get("include_dismissed", ["0"])[0] == "1"
                 with __import__("sqlite3").connect(db_path) as conn:
                     conn.row_factory = __import__("sqlite3").Row
+                    # SQL-side LEFT JOIN — compute the canonical key once and
+                    # match against dismissed_tips. Default view filters out
+                    # dismissed rows; ?include_dismissed=1 keeps them with a
+                    # `dismissed` flag so the frontend can render the
+                    # Undismiss button.
                     rows = [dict(r) for r in conn.execute(
-                        "SELECT id, rule_id, severity, session_id, message, "
-                        "estimated_savings, created_at, title, where_text, "
-                        "what_text, how_to_fix, occurred_at, deep_link "
-                        "FROM tips ORDER BY estimated_savings DESC, id ASC"
+                        "SELECT t.id, t.rule_id, t.severity, t.session_id, t.message, "
+                        "t.estimated_savings, t.created_at, t.title, t.where_text, "
+                        "t.what_text, t.how_to_fix, t.occurred_at, t.deep_link, "
+                        "(t.rule_id || ':' || COALESCE(t.session_id, 'global')) AS computed_key, "
+                        "(d.tip_key IS NOT NULL) AS is_dismissed "
+                        "FROM tips t "
+                        "LEFT JOIN dismissed_tips d "
+                        "  ON d.tip_key = (t.rule_id || ':' || COALESCE(t.session_id, 'global')) "
+                        "ORDER BY t.estimated_savings DESC, t.id ASC"
                     )]
                 from datetime import datetime as _dt, timezone as _tz
+                out = []
                 for r in rows:
-                    r["key"] = f"{r['rule_id']}:{r['session_id'] or 'global'}"
+                    dismissed = bool(r.pop("is_dismissed"))
+                    if not include_dismissed and dismissed:
+                        continue
+                    r["key"] = r.pop("computed_key")
                     r["where"] = r.pop("where_text", None)
                     r["what"] = r.pop("what_text", None)
                     epoch = r.get("occurred_at")
@@ -166,7 +181,9 @@ def build_handler(db_path: str, projects_dir: str):
                         _dt.fromtimestamp(epoch, tz=_tz.utc).isoformat()
                         if isinstance(epoch, (int, float)) else None
                     )
-                return _send_json(self, rows)
+                    r["dismissed"] = dismissed
+                    out.append(r)
+                return _send_json(self, out)
             if path == "/api/health":
                 with __import__("sqlite3").connect(db_path) as conn:
                     conn.row_factory = __import__("sqlite3").Row
@@ -229,6 +246,18 @@ def build_handler(db_path: str, projects_dir: str):
             if url.path == "/api/plan":
                 set_plan(db_path, body.get("plan", "api"))
                 return _send_json(self, {"ok": True})
+            if url.path == "/api/tips/dismiss":
+                key = body.get("key")
+                if not isinstance(key, str) or not key.strip():
+                    return _send_error(self, 400, "missing key")
+                with __import__("sqlite3").connect(db_path) as conn:
+                    conn.execute(
+                        "INSERT OR IGNORE INTO dismissed_tips (tip_key, dismissed_at) "
+                        "VALUES (?, strftime('%s','now'))",
+                        (key,),
+                    )
+                    conn.commit()
+                return _send_json(self, {})
             if url.path == "/api/analyze" or url.path.startswith("/api/analyze/"):
                 force = body.get("force") is True
                 try:
@@ -247,6 +276,31 @@ def build_handler(db_path: str, projects_dir: str):
                     return _send_error(self, 429, str(e))
                 except RuntimeError as e:
                     return _send_error(self, 502, str(e))
+            self.send_response(404)
+            self.end_headers()
+
+        def do_DELETE(self):
+            url = urlparse(self.path)
+            try:
+                length = int(self.headers.get("Content-Length") or 0)
+            except ValueError:
+                return _send_error(self, 400, "invalid Content-Length")
+            if length < 0 or length > MAX_POST_BYTES:
+                return _send_error(self, 413, f"body too large (max {MAX_POST_BYTES} bytes)")
+            try:
+                body = json.loads(self.rfile.read(length) or b"{}") if length else {}
+            except json.JSONDecodeError:
+                return _send_error(self, 400, "invalid JSON")
+            if not isinstance(body, dict):
+                return _send_error(self, 400, "body must be a JSON object")
+            if url.path == "/api/tips/dismiss":
+                key = body.get("key")
+                if not isinstance(key, str) or not key.strip():
+                    return _send_error(self, 400, "missing key")
+                with __import__("sqlite3").connect(db_path) as conn:
+                    conn.execute("DELETE FROM dismissed_tips WHERE tip_key = ?", (key,))
+                    conn.commit()
+                return _send_json(self, {})
             self.send_response(404)
             self.end_headers()
 
