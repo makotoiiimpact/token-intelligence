@@ -275,3 +275,24 @@ def scan_dir(projects_root: Union[str, Path], db_path: Union[str, Path]) -> dict
             totals["files"]    += 1
         conn.commit()
     return totals
+
+
+def scan_and_recompute(projects_root: Union[str, Path], db_path: Union[str, Path]) -> dict:
+    """Ingest JSONL → `messages`, then recompute `session_health` and `tips`
+    if any new messages were ingested.
+
+    Idempotent. Returns the scan counts dict (`{"messages", "tools", "files"}`),
+    so callers can decide whether to emit downstream events. Skips recompute
+    when the scan found nothing new — see `cmd_dashboard` for the always-recompute
+    boot path that exists separately to handle pre-populated DBs that have no
+    tips computed yet.
+
+    Imports recompute_* lazily so scanner.py stays free of module-level cycles.
+    """
+    n = scan_dir(projects_root, db_path)
+    if n["messages"] > 0:
+        from .health_score import recompute_health
+        from .tips_engine import recompute_tips
+        recompute_health(db_path)
+        recompute_tips(db_path)
+    return n

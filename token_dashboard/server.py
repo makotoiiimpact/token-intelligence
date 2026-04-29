@@ -20,7 +20,7 @@ from .tips_engine import recompute_tips
 from .health_score import (
     session_breakdown, recompute_health, discipline_aggregate,
 )
-from .scanner import scan_dir
+from .scanner import scan_dir, scan_and_recompute
 from .skills import cached_catalog
 from . import ai_analyzer
 
@@ -207,7 +207,11 @@ def build_handler(db_path: str, projects_dir: str):
             if path == "/api/plan":
                 return _send_json(self, {"plan": get_plan(db_path), "pricing": pricing})
             if path == "/api/scan":
-                n = scan_dir(projects_dir, db_path)
+                # Behavior change vs pre-fix: this endpoint now recomputes
+                # health + tips when the scan ingests new messages. The old
+                # behavior (scan-only, leaving tips stale) was silently
+                # broken — see fix/tips-compute-on-fresh-db PR for context.
+                n = scan_and_recompute(projects_dir, db_path)
                 return _send_json(self, n)
             if path == "/api/stream":
                 self.send_response(200)
@@ -258,6 +262,12 @@ def build_handler(db_path: str, projects_dir: str):
                     )
                     conn.commit()
                 return _send_json(self, {})
+            if url.path == "/api/tips/recompute":
+                # Manual idempotent trigger — useful for support, debugging,
+                # and screenshot recapture. No body required. Returns the
+                # row count after recompute_tips truncates and rewrites.
+                count = recompute_tips(db_path)
+                return _send_json(self, {"ok": True, "count": int(count)})
             if url.path == "/api/analyze" or url.path.startswith("/api/analyze/"):
                 force = body.get("force") is True
                 try:
@@ -310,13 +320,12 @@ def build_handler(db_path: str, projects_dir: str):
 def _scan_loop(db_path: str, projects_dir: str, interval: float = 30.0):
     while True:
         try:
-            n = scan_dir(projects_dir, db_path)
+            # `scan_and_recompute` ingests new JSONL bytes and runs
+            # `recompute_health` / `recompute_tips` only when something new
+            # came in. Returns the scan counts dict so we can decide whether
+            # to wake SSE clients.
+            n = scan_and_recompute(projects_dir, db_path)
             if n["messages"] > 0:
-                try:
-                    recompute_health(db_path)
-                    recompute_tips(db_path)
-                except Exception as e:
-                    EVENTS.put({"type": "error", "message": f"recompute: {e}"})
                 EVENTS.put({"type": "scan", "n": n, "ts": time.time()})
         except Exception as e:
             EVENTS.put({"type": "error", "message": str(e)})
