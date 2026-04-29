@@ -1,5 +1,6 @@
 import { api, fmt, state, getThresholds } from '/web/app.js';
 import { areaChartWithThresholds, horizontalBarChart, donutChart } from '/web/charts.js';
+import { renderReco, compact, attachExpandHandlers } from '/web/recos.js';
 
 const RANGES = [
   { key: '7d',  label: '7d',  days: 7 },
@@ -65,17 +66,6 @@ function severityFromScore(score) {
   return 'bad';
 }
 
-function severityFromTip(sev) {
-  if (sev === 'critical') return 'critical';
-  if (sev === 'warning')  return 'warning';
-  return 'info';
-}
-
-function titleFromRule(ruleId) {
-  if (!ruleId) return 'Tip';
-  return String(ruleId).replace(/_/g, ' ').toLowerCase().replace(/\b\w/g, c => c.toUpperCase());
-}
-
 function animateCounter(el, target, opts = {}) {
   const duration = opts.duration || 900;
   const format = opts.format || (v => Math.round(v).toLocaleString());
@@ -88,14 +78,6 @@ function animateCounter(el, target, opts = {}) {
     if (p < 1) requestAnimationFrame(step);
   }
   requestAnimationFrame(step);
-}
-
-function compact(n) {
-  const x = Number(n || 0);
-  if (Math.abs(x) >= 1e9) return (x / 1e9).toFixed(1).replace(/\.0$/, '') + 'B';
-  if (Math.abs(x) >= 1e6) return (x / 1e6).toFixed(1).replace(/\.0$/, '') + 'M';
-  if (Math.abs(x) >= 1e3) return (x / 1e3).toFixed(1).replace(/\.0$/, '') + 'K';
-  return Math.round(x).toLocaleString();
 }
 
 export default async function (root) {
@@ -175,20 +157,10 @@ export default async function (root) {
       </div>
     </div>`;
 
-  // Quick Wins panel (surfaces top 3 AI Recos)
+  // Quick Wins panel — top 3 AI Recos rendered via the shared module.
   const quickWinsHtml = quickWins.length === 0
     ? `<p class="muted" style="margin:0;font-size:13px">No recommendations detected — nice hygiene. Run a fresh scan to recompute.</p>`
-    : quickWins.map(t => `
-        <div class="quickwin ${severityFromTip(t.severity)}">
-          <span class="dot"></span>
-          <div class="body">
-            <div class="title">${fmt.htmlSafe(t.title || titleFromRule(t.rule_id))}</div>
-            <div class="msg">${fmt.htmlSafe(t.message || t.body || '')}</div>
-          </div>
-          ${t.estimated_savings
-            ? `<span class="savings">~${compact(t.estimated_savings)} saved</span>`
-            : ''}
-        </div>`).join('');
+    : quickWins.map(t => renderReco(t, { compact: true })).join('');
 
   root.innerHTML = `
     <div class="flex" style="margin-bottom:20px">
@@ -219,7 +191,7 @@ export default async function (root) {
           <a href="#/ai-recos" style="font-family:var(--sans);font-weight:500;font-size:12px">all →</a>
         </h3>
         <p class="muted" style="margin:6px 0 10px;font-size:12px">Top recommendations by estimated savings.</p>
-        ${quickWinsHtml}
+        <div id="quickwins-list">${quickWinsHtml}</div>
       </div>
     </div>
 
@@ -281,6 +253,10 @@ export default async function (root) {
   animateCounter(document.getElementById('m-sessions'), totals.sessions || 0);
   animateCounter(document.getElementById('m-cost'),     Number(totals.cost_usd || 0),
     { format: v => '$' + v.toFixed(2) });
+
+  // Wire expand/collapse on Quick Wins recos.
+  const winsList = document.getElementById('quickwins-list');
+  if (winsList) attachExpandHandlers(winsList);
 
   // Daily token burn — area chart with threshold lines
   const burnPerDay = daily.map(d =>

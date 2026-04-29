@@ -1,5 +1,9 @@
-// AI Recos tab — severity filter pills, reco cards, "Analyze with AI" panel.
+// AI Recos tab — severity filter pills, structured reco cards, "Analyze with AI" panel.
+// Card rendering + expand/collapse live in /web/recos.js (shared with the
+// Overview Quick Wins panel). This route owns: data fetch, filtering, and
+// the AI analysis side-panel.
 import { api, fmt } from '/web/app.js';
+import { renderReco, severityOf, attachExpandHandlers } from '/web/recos.js';
 
 const FILTERS = [
   { key: 'all',      label: 'All' },
@@ -18,46 +22,6 @@ function readFilter() {
 function writeFilter(key) {
   const base = (location.hash.replace(/^#/, '').split('?')[0]) || '/ai-recos';
   location.hash = '#' + base + '?filter=' + encodeURIComponent(key);
-}
-
-function severityOf(t) {
-  const s = String(t.severity || '').toLowerCase();
-  return (s === 'critical' || s === 'warning' || s === 'info') ? s : 'info';
-}
-
-function titleFromRule(ruleId) {
-  if (!ruleId) return 'Recommendation';
-  return String(ruleId).replace(/_/g, ' ').toLowerCase().replace(/\b\w/g, c => c.toUpperCase());
-}
-
-function compact(n) {
-  const x = Number(n || 0);
-  if (Math.abs(x) >= 1e9) return (x / 1e9).toFixed(1).replace(/\.0$/, '') + 'B';
-  if (Math.abs(x) >= 1e6) return (x / 1e6).toFixed(1).replace(/\.0$/, '') + 'M';
-  if (Math.abs(x) >= 1e3) return (x / 1e3).toFixed(1).replace(/\.0$/, '') + 'K';
-  return Math.round(x).toLocaleString();
-}
-
-function iconFor(severity) {
-  if (severity === 'critical') return '!';
-  if (severity === 'warning')  return '▲';
-  return 'i';
-}
-
-function renderReco(t) {
-  const sev = severityOf(t);
-  const title = titleFromRule(t.rule_id);
-  const message = t.message || t.body || '';
-  const saves = t.estimated_savings ? `<span class="saves">~${compact(t.estimated_savings)} saved</span>` : '<span></span>';
-  return `
-    <div class="reco ${sev}">
-      <div class="icon">${iconFor(sev)}</div>
-      <div class="body">
-        <div class="rule">${fmt.htmlSafe(title)}</div>
-        <div class="desc">${fmt.htmlSafe(message)}</div>
-      </div>
-      ${saves}
-    </div>`;
 }
 
 function renderAiPanel(result) {
@@ -94,7 +58,9 @@ export default async function (root) {
   const counts = { all: sorted.length, critical: 0, warning: 0, info: 0 };
   for (const t of sorted) counts[severityOf(t)] = (counts[severityOf(t)] || 0) + 1;
 
-  const filtered = filter.key === 'all' ? sorted : sorted.filter(t => severityOf(t) === filter.key);
+  const filtered = filter.key === 'all'
+    ? sorted
+    : sorted.filter(t => severityOf(t) === filter.key);
 
   const filterPills = `
     <div class="range-tabs" role="tablist">
@@ -119,16 +85,22 @@ export default async function (root) {
       <div id="reco-list">
         ${filtered.length === 0
           ? `<p class="muted" style="margin:0;font-size:13px">No ${filter.key === 'all' ? 'recommendations' : filter.key + ' recos'} right now. Run a scan to recompute.</p>`
-          : filtered.map(renderReco).join('')}
+          : filtered.map(t => renderReco(t)).join('')}
       </div>
     </div>
 
     <div id="ai-out"></div>
   `;
 
+  // Filter chip clicks — full re-render via hashchange (existing pattern).
   root.querySelectorAll('.range-tabs button[data-filter]').forEach(btn => {
     btn.addEventListener('click', () => writeFilter(btn.dataset.filter));
   });
+
+  // Expand/collapse — single delegated listener on the list container.
+  // No full re-render; toggles aria-expanded + .reco--expanded class.
+  const list = root.querySelector('#reco-list');
+  if (list) attachExpandHandlers(list);
 
   const btn = root.querySelector('#btn-analyze');
   const out = root.querySelector('#ai-out');

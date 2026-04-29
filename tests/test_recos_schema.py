@@ -486,5 +486,100 @@ class TipsApiSerializesStructuredFields(unittest.TestCase):
         self.assertTrue(marathon["occurred_at"].startswith("2026-04-18"))
 
 
+class Phase2FrontendContract(unittest.TestCase):
+    """Regression test for Phase 2: every tip on /api/tips must carry the
+    structured fields the frontend now reads (`title`, `where`, `what`,
+    `how_to_fix`, `occurred_at`, `deep_link`). Decoupled from rule-specific
+    copy so it survives future copy passes; this is purely a shape contract.
+
+    The frontend's `web/recos.js` falls back to `t.message` when structured
+    fields are missing, but that's a graceful-degrade path — the contract
+    is that the structured fields are *present* (possibly null for global
+    rules' `occurred_at` / `deep_link`).
+    """
+
+    REQUIRED_KEYS = {
+        "rule_id", "severity", "session_id", "message", "estimated_savings",
+        "key", "title", "where", "what", "how_to_fix", "occurred_at", "deep_link",
+    }
+    NEVER_NULL_FOR_PER_SESSION = ("title", "where", "what", "how_to_fix")
+
+    def setUp(self):
+        self.tmp = tempfile.mkdtemp()
+        self.db = os.path.join(self.tmp, "t.db")
+        init_db(self.db)
+        _seed_marathon(self.db)
+        # Seed a global rule (EXPENSIVE_TOOL) too — its `deep_link` and
+        # `occurred_at` are intentionally null, exercising the nullable path.
+        with connect(self.db) as c:
+            c.execute(
+                "INSERT INTO messages (uuid, session_id, project_slug, type, timestamp) "
+                "VALUES ('m1','S','p','user', ?)", ("2026-04-18T00:00:00Z",),
+            )
+            for i in range(4):
+                c.execute(
+                    "INSERT INTO tool_calls (message_uuid, session_id, project_slug, "
+                    "tool_name, target, result_tokens, timestamp, is_error) "
+                    "VALUES ('m1','S','p','_tool_result','Glob(**)',80000,?,0)",
+                    (f"2026-04-18T00:00:{i:02d}Z",),
+                )
+            c.commit()
+        recompute_tips(self.db, SINCE)
+        self.port = _free_port()
+        H = build_handler(self.db, projects_dir="/nonexistent")
+        self.httpd = http.server.HTTPServer(("127.0.0.1", self.port), H)
+        threading.Thread(target=self.httpd.serve_forever, daemon=True).start()
+
+    def tearDown(self):
+        self.httpd.shutdown()
+
+    def _fetch(self):
+        body = urllib.request.urlopen(f"http://127.0.0.1:{self.port}/api/tips").read()
+        rows = json.loads(body)
+        self.assertGreaterEqual(len(rows), 2, "Expected at least one per-session and one global tip")
+        return rows
+
+    def test_every_tip_carries_required_keys(self):
+        """All twelve required keys must be present on every tip."""
+        for tip in self._fetch():
+            missing = self.REQUIRED_KEYS - set(tip.keys())
+            self.assertFalse(
+                missing,
+                f"{tip.get('rule_id')} missing keys: {sorted(missing)}",
+            )
+
+    def test_per_session_tips_have_non_null_diagnosis_fields(self):
+        """Per-session rules must populate title/where/what/how_to_fix.
+        Global rules may leave occurred_at/deep_link null but still must have
+        the diagnosis prose set."""
+        for tip in self._fetch():
+            for k in self.NEVER_NULL_FOR_PER_SESSION:
+                self.assertIsNotNone(
+                    tip[k], f"{tip['rule_id']}.{k} is null but should always be populated",
+                )
+                self.assertNotEqual(tip[k], "", f"{tip['rule_id']}.{k} is empty")
+
+    def test_global_rule_has_null_session_link(self):
+        """EXPENSIVE_TOOL is the canonical global rule — deep_link and
+        occurred_at must be null so the frontend correctly omits the footer."""
+        rows = self._fetch()
+        global_tip = next((r for r in rows if r["session_id"] is None), None)
+        self.assertIsNotNone(global_tip, "Expected at least one global tip")
+        self.assertIsNone(global_tip["deep_link"])
+        self.assertIsNone(global_tip["occurred_at"])
+
+    def test_per_session_deep_link_uses_sessions_route(self):
+        """deep_link must match the frontend's /sessions/{id} routing
+        contract — Phase 2 renders this as href='#{deep_link}'."""
+        for tip in self._fetch():
+            if tip["session_id"] is None:
+                continue
+            self.assertTrue(
+                tip["deep_link"].startswith("/sessions/"),
+                f"{tip['rule_id']} deep_link does not match /sessions/ route: "
+                f"{tip['deep_link']!r}",
+            )
+
+
 if __name__ == "__main__":
     unittest.main()

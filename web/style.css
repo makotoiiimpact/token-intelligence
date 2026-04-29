@@ -560,18 +560,15 @@ button.ghost:hover { color: var(--text); }
 .tip-head strong { font-family: var(--display); font-size: 15px; font-weight: 500; }
 .tip-body { margin: 8px 0 0; color: var(--text-2); font-size: 13px; }
 
-/* ---------- AI Recos cards (severity left-border) ---------- */
+/* ---------- AI Recos cards (severity left-border, expand/collapse) ---------- */
 .reco {
   position: relative;
-  display: grid;
-  grid-template-columns: auto 1fr auto;
-  gap: 14px;
-  padding: 16px 18px 16px 22px;
   margin: 12px 0;
   border-radius: 16px;
   border: 1px solid var(--card-border);
   background: linear-gradient(135deg, rgba(100, 140, 255, 0.06) 0%, rgba(255, 255, 255, 0.02) 100%);
   transition: border-color 160ms var(--ease), background 160ms var(--ease);
+  overflow: hidden;
 }
 .reco:hover {
   border-color: var(--card-border-hover);
@@ -588,12 +585,34 @@ button.ghost:hover { color: var(--text); }
   background: var(--cyan);
   box-shadow: 0 0 12px currentColor;
   color: var(--cyan);
+  pointer-events: none;
 }
-.reco.critical::before { color: var(--red);    background: var(--red); }
-.reco.warning::before  { color: var(--yellow); background: var(--yellow); }
-.reco.info::before     { color: var(--cyan);   background: var(--cyan); }
+.reco--critical::before { color: var(--red);    background: var(--red); }
+.reco--warning::before  { color: var(--yellow); background: var(--yellow); }
+.reco--info::before     { color: var(--cyan);   background: var(--cyan); }
 
-.reco .icon {
+/* The header is the click target: a real <button> for keyboard a11y. */
+.reco__header {
+  display: grid;
+  grid-template-columns: auto 1fr auto;
+  gap: 14px;
+  align-items: start;
+  width: 100%;
+  padding: 16px 18px 16px 22px;
+  background: transparent;
+  border: 0;
+  color: inherit;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+.reco__header:focus-visible {
+  outline: 2px solid var(--cyan);
+  outline-offset: -2px;
+  border-radius: 16px;
+}
+
+.reco__icon {
   width: 28px;
   height: 28px;
   display: grid;
@@ -605,12 +624,12 @@ button.ghost:hover { color: var(--text); }
   font-size: 14px;
   color: var(--text);
 }
-.reco.critical .icon { color: var(--red);    background: rgba(255, 66, 61, 0.10); }
-.reco.warning  .icon { color: var(--yellow); background: rgba(255, 214, 0, 0.10); }
-.reco.info     .icon { color: var(--cyan);   background: rgba(0, 255, 224, 0.10); }
+.reco--critical .reco__icon { color: var(--red);    background: rgba(255, 66, 61, 0.10); }
+.reco--warning  .reco__icon { color: var(--yellow); background: rgba(255, 214, 0, 0.10); }
+.reco--info     .reco__icon { color: var(--cyan);   background: rgba(0, 255, 224, 0.10); }
 
-.reco .body { min-width: 0; }
-.reco .rule {
+.reco__head-body { min-width: 0; }
+.reco__title {
   font-family: var(--display);
   font-weight: 500;
   font-size: 14px;
@@ -618,12 +637,13 @@ button.ghost:hover { color: var(--text); }
   color: var(--text);
   margin-bottom: 2px;
 }
-.reco .desc {
-  font-size: 13px;
-  color: var(--text-2);
-  line-height: 1.55;
+.reco__meta {
+  font-family: var(--mono);
+  font-size: 11px;
+  color: var(--text-3);
 }
-.reco .saves {
+
+.reco__saves {
   align-self: start;
   padding: 4px 10px;
   border-radius: var(--r-pill);
@@ -635,6 +655,64 @@ button.ghost:hover { color: var(--text); }
   border: 1px solid rgba(25, 245, 140, 0.25);
   white-space: nowrap;
 }
+
+/* Body — hidden until the card is expanded. No CSS animation in v1. */
+.reco__body {
+  display: none;
+  padding: 0 18px 16px 22px;
+}
+.reco--expanded .reco__body { display: block; }
+
+.reco__row {
+  display: grid;
+  grid-template-columns: 90px 1fr;
+  gap: 10px;
+  padding: 8px 0;
+  border-top: 1px solid var(--card-border);
+}
+.reco__label {
+  font-family: var(--mono);
+  font-size: 11px;
+  color: var(--text-3);
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  padding-top: 2px;
+}
+.reco__value {
+  font-size: 13px;
+  color: var(--text-2);
+  line-height: 1.55;
+  word-break: break-word;
+}
+
+.reco__footer {
+  margin-top: 10px;
+  padding-top: 10px;
+  border-top: 1px solid var(--card-border);
+}
+.reco__footer a {
+  font-family: var(--sans);
+  font-weight: 500;
+  font-size: 12px;
+}
+
+/* Compact variant — used by Quick Wins on Overview. */
+.reco--compact { margin: 8px 0; }
+.reco--compact .reco__header {
+  padding: 12px 14px 12px 18px;
+  gap: 10px;
+}
+.reco--compact .reco__icon {
+  width: 24px;
+  height: 24px;
+  font-size: 12px;
+}
+.reco--compact .reco__title { font-size: 13px; }
+.reco--compact .reco__meta  { font-size: 10px; }
+.reco--compact .reco__body  { padding: 0 14px 12px 18px; }
+.reco--compact .reco__row   { padding: 6px 0; }
+.reco--compact .reco__label { font-size: 10px; }
+.reco--compact .reco__value { font-size: 12px; }
 
 /* ---------- AI analysis panel (glass card) ---------- */
 .ai-panel {
