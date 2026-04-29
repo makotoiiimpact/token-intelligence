@@ -34,13 +34,18 @@ def _today_range():
 def cmd_scan(args):
     db = _db_path(args)
     init_db(db)
-    n = scan_dir(_projects(args), db)
-    from token_dashboard.health_score import recompute_health
-    from token_dashboard.tips_engine import recompute_tips
-    hn = recompute_health(db)
-    tn = recompute_tips(db)
+    from token_dashboard.scanner import scan_and_recompute
+    n = scan_and_recompute(_projects(args), db)
     print(f"Token Dashboard: scanned {n['files']} files, {n['messages']} messages, {n['tools']} tool calls")
-    print(f"  recomputed {hn} session health rows, {tn} tips")
+    if n["messages"] > 0:
+        # Wrapper just ran recompute — read fresh counts from the tables.
+        import sqlite3
+        with sqlite3.connect(db) as c:
+            hn = c.execute("SELECT COUNT(*) FROM session_health").fetchone()[0]
+            tn = c.execute("SELECT COUNT(*) FROM tips").fetchone()[0]
+        print(f"  recomputed {hn} session health rows, {tn} tips")
+    else:
+        print("  no new messages — recompute skipped")
 
 
 def cmd_today(args):
@@ -83,7 +88,16 @@ def cmd_dashboard(args):
     db = _db_path(args)
     init_db(db)
     if not args.no_scan:
+        # Unconditional recompute on boot — `scan_and_recompute` would skip
+        # when nothing new is ingested, but a DB that was already fully
+        # populated by a previous run still needs tips/health computed
+        # if they're stale or missing. One ~0.2s pass at boot guarantees
+        # the dashboard never opens to an empty AI Recos tab.
         scan_dir(_projects(args), db)
+        from token_dashboard.health_score import recompute_health
+        from token_dashboard.tips_engine import recompute_tips
+        recompute_health(db)
+        recompute_tips(db)
     from token_dashboard.server import run
 
     host = os.environ.get("HOST", "127.0.0.1")
